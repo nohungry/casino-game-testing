@@ -1,0 +1,79 @@
+# =============================================================================
+# brands/_schema.yaml  —  品牌設定「欄位說明書」（不是真資料）
+# =============================================================================
+# 用途：
+#   1. 定義一份 brands/<brand>.yaml 必須有哪些欄位、每欄意義/型別/範例/合法值。
+#   2. calibrate 模式產出 brands/<brand>.yaml 時照此規格填；game-batch-runner 照此讀。
+#   3. 本檔 + _template.yaml 入 repo（純說明、無站點機密）；
+#      真資料 brands/<brand>.yaml 是 calibrate 產出、gitignore，每個 QA 自己跑。
+#
+# 範例值取自舊專案已驗證的 品牌H 參數（247 款 100% 通過），僅供對照；
+# 各品牌實際值由 calibrate 探測產生，不要照抄。
+#
+# 座標系統：所有 xy 皆為「校準當下 viewport 下的 CSS 像素」。
+# 視窗大小策略：一律靠「瀏覽器滿版」維持一致，**不呼叫 browser_resize**（程式 resize 會有顯示問題）。
+#   calibrate 只「讀」當下實際 viewport 記進 spin.viewport；run 起手只「讀+比對」，不一致就 fail-fast。
+#   故 brands/<brand>.yaml 與所在機器/螢幕綁定（本來就 gitignore、各人本機 calibrate），跨機器不可共用座標。
+# =============================================================================
+
+# --- 識別 -------------------------------------------------------------------
+schema_version: 1                 # int，此 schema 版本，目前固定 1
+brand: brandh                    # str，品牌 slug（小寫無空白），= 檔名 brands/<brand>.yaml
+display_name: "品牌H 電子"      # str，人類可讀名稱，報告用
+game_platform_id: "1048"          # str，第三方平台的 gamePlatformId（若該站 URL/清單用得到）
+
+# --- 進入遊戲（從大廳點某一款）---------------------------------------------
+launch:
+  selector_pattern: 'img[alt="{name}"]'  # str，定位遊戲縮圖的選擇器；{name} 會被遊戲名取代
+  use_nth: true                   # bool，同名/重複縮圖時是否用 .nth(index) 區分
+  click_timeout_ms: 15000         # int，點縮圖的等待上限（毫秒）
+
+# --- 載入 -------------------------------------------------------------------
+load_timeout_ms: 120000           # int，等遊戲載入完成的上限（品牌H 平均 60-90s，最長 ~100s）
+post_load_settle_ms: 4000         # int，載入後再靜置多久才動作（讓動畫/資產穩定）
+
+# --- 通過介紹頁（splash / intro / CLICK TO CONTINUE）-----------------------
+intro:
+  clicks: 3                       # int，要點幾下才能穿過介紹（0 = 無介紹頁）
+  click_xy: [960, 490]            # [int,int]，每次點的座標（畫面中央偏上）
+  interval_ms: 2500               # int，兩次點擊間隔
+
+# --- SPIN（最關鍵）---------------------------------------------------------
+spin:
+  xy: [1283, 857]                 # [int,int]，SPIN 按鈕座標（Canvas/WebGL 無 DOM，用座標點）
+  settle_ms: 10000                # int，點 SPIN 後等結算動畫跑完再讀餘額
+  viewport: [1920, 945]           # [int,int]，校準 xy 時讀到的實際 viewport（滿版下）；run 起手只讀+比對，不一致 fail-fast（不 resize）
+
+# --- 餘額驗證（PASS 的唯一可靠依據；無 delta 不准 PASS）--------------------
+balance:
+  source: iframe                  # enum: iframe | dom，餘額文字在跨域 iframe 內還是主 DOM
+  text_pattern: 'B\s*([\d,]+\.\d{2})'  # str(regex)，從餘額文字抓數字；capture group 1 = 金額
+  retry_reads: 3                  # int，讀不到餘額時重讀幾次（動畫未停時數字會跳）
+
+# --- 投注 -------------------------------------------------------------------
+bet:
+  default: 50.00                  # float，預設投注額（直接按 SPIN 就用這個）
+  unit: THB                       # str，幣別，報告/對帳用
+  step: 10                        # float，按一下加減鈕的變動量
+  adjust_method: arrows           # enum: arrows | slider | none，調 bet 的方式；none = 不調、用 default
+
+# --- OOPS 錯誤彈窗處理 ------------------------------------------------------
+oops:
+  detect_in: iframe               # enum: iframe | dom，錯誤彈窗出現在哪一層
+  selectors:                      # list[str]，偵測彈窗存在用的選擇器（任一命中即視為 OOPS）
+    - 'text=OOPS'
+    - 'text=Something went wrong'
+  dismiss_button: 'text=OK'       # str，關閉彈窗的按鈕選擇器
+  retry_after_dismiss: true       # bool，關掉後是否重試一次 SPIN
+  max_retry: 1                    # int，最多重試幾次（避免無限迴圈）
+
+# --- 退出回大廳 -------------------------------------------------------------
+exit:
+  parent_trigger: 'text=回到大廳'           # str，主頁面上「回大廳」的選擇器
+  modal_confirm: 'button:has-text("確定")'  # str，確認離開的彈窗按鈕；無確認彈窗則設 null
+  wait_after_ms: 5000                       # int，回大廳後靜置多久才進下一款
+
+# --- 批次 -------------------------------------------------------------------
+batch:
+  size: 8                         # int，每個 batch-runner 處理幾款（建議 8-10）
+  parallel_batches: 1             # int，同時跑幾個 batch（>1 需多分頁/多 context，先保守設 1）

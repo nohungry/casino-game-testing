@@ -1,0 +1,26 @@
+# Brand 校準結果由 AI 在本機產生，不入 repo（每個 QA 自己 calibrate）
+brands/*.yaml
+!brands/_schema.yaml
+!brands/_template.yaml
+
+# 測試報告 / 截圖 / 中繼檔
+reports/
+tmp/
+*.log
+
+# Playwright MCP 執行工件（snapshot / console log）
+.playwright-mcp/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Claude Code 本機設定（個人權限不要污染團隊）
+.claude/settings.local.json
+
+# MCP 設定含本機 Chromium 路徑（含使用者名稱），各人本機自己填
+# 共用範本是 .mcp.json.example；clone 後 cp .mcp.json.example .mcp.json 再填路徑
+.mcp.json
+!.mcp.json.example

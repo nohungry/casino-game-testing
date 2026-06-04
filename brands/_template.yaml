@@ -1,0 +1,56 @@
+# brands/_template.yaml  —  空白填空骨架（calibrate 模式複製此檔去填值）
+# 每欄意義/型別/合法值見 brands/_schema.yaml。填不出來的欄位寫進 _calibration_gaps，
+# 禁止用 default 偷渡（65 款翻車根因）。
+
+schema_version: 1
+brand:                  # 小寫 slug，= 檔名
+display_name:
+game_platform_id:
+
+launch:
+  selector_pattern:
+  use_nth:
+  click_timeout_ms:
+
+load_timeout_ms:
+post_load_settle_ms:
+
+intro:
+  clicks:
+  click_xy:             # [x, y]
+  interval_ms:
+
+spin:
+  xy:                   # [x, y]  ← 最關鍵
+  settle_ms:
+  viewport:             # [w, h]  ← 校準 xy 時的 viewport，必填
+
+balance:
+  source:               # iframe | dom
+  text_pattern:         # regex，capture group 1 = 金額
+  retry_reads:
+
+bet:
+  default:
+  unit:
+  step:
+  adjust_method:        # arrows | slider | none
+
+oops:
+  detect_in:            # iframe | dom
+  selectors: []
+  dismiss_button:
+  retry_after_dismiss:
+  max_retry:
+
+exit:
+  parent_trigger:
+  modal_confirm:        # 無確認彈窗則 null
+  wait_after_ms:
+
+batch:
+  size:
+  parallel_batches:
+
+# calibrate 探不到的欄位列在這，請使用者人工確認後補上；非空代表此 yaml 尚未可用於 run。
+_calibration_gaps: []
