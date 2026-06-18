@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#13212B; --ink2:#2B3A45; --paper:#F2F5F7; --card:#FFFFFF;
+    --line:#DCE3E9; --line-strong:#C3CDD5; --muted:#5C6770;
+    --green:#0E7A57; --green-soft:#E4F1EB; --green-line:#A9D6C5;
+    --amber:#A8650A; --amber-soft:#FBF0DC; --amber-line:#EBCF92;
+    --red:#BC392C; --red-soft:#FBE8E5; --red-line:#EBB3AC;
+    --tint:#EBF0EE;
+    --display:'Space Grotesk','Noto Sans TC',sans-serif;
+    --body:'Noto Sans TC',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:var(--body); line-height:1.7; font-size:15px; -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:980px; margin:0 auto; padding:0 22px 80px;}
+
+  .masthead{background:var(--ink); color:#EAF0F2; margin:0 -22px 0; border-bottom:3px solid var(--green);}
+  .masthead-inner{max-width:980px; margin:0 auto; padding:30px 22px 26px;}
+  .kicker{font-family:var(--mono); font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:#7FB8A4; margin:0 0 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .kicker .dot{width:5px;height:5px;border-radius:50%;background:var(--green);display:inline-block}
+  .masthead h1{font-family:var(--display); font-weight:700; font-size:31px; line-height:1.18; margin:0 0 6px; letter-spacing:-.01em;}
+  .masthead .sub{color:#A9B8C0; font-size:14px; margin:0 0 20px; max-width:60ch}
+  .meta-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.09); border-radius:8px; overflow:hidden;}
+  .meta-grid div{background:var(--ink); padding:11px 14px;}
+  .meta-grid .l{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:#6E828C; margin-bottom:3px}
+  .meta-grid .v{font-size:13.5px; color:#E6EDEF; font-weight:500; word-break:break-all}
+
+  .verdict{background:var(--card); border:1px solid var(--line); border-left:4px solid var(--green); border-radius:10px; padding:24px 26px; margin:26px 0 8px; box-shadow:0 1px 0 rgba(19,33,43,.03);}
+  .verdict-head{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:12px}
+  .verdict-head h2{font-family:var(--display); font-weight:700; font-size:18px; margin:0}
+  .chip{font-family:var(--mono); font-size:11px; letter-spacing:.06em; font-weight:600; padding:4px 11px; border-radius:999px; white-space:nowrap;}
+  .chip.pass{background:var(--green-soft); color:var(--green); border:1px solid var(--green-line)}
+  .chip.clean{background:var(--tint); color:var(--ink2); border:1px solid var(--line-strong)}
+  .chip.warn{background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line)}
+  .chip.fail{background:var(--red-soft); color:var(--red); border:1px solid var(--red-line)}
+  .verdict p{margin:0 0 12px; font-size:15px}
+  .verdict p:last-child{margin-bottom:0}
+  .verdict .lead{font-size:15.5px}
+  .verdict b{color:var(--ink)}
+  .hl-green{color:var(--green); font-weight:700}
+  .hl-red{color:var(--red); font-weight:700}
+
+  section{margin-top:40px}
+  .sec-head{display:flex; align-items:baseline; gap:12px; margin-bottom:16px; border-bottom:1px solid var(--line-strong); padding-bottom:9px}
+  .sec-no{font-family:var(--mono); font-size:12px; color:var(--green); font-weight:600; letter-spacing:.05em}
+  .sec-head h2{font-family:var(--display); font-weight:600; font-size:20px; margin:0; letter-spacing:-.01em}
+  .sec-head .en{font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.1em; text-transform:uppercase; margin-left:auto}
+
+  .metrics{display:grid; grid-template-columns:repeat(6,1fr); gap:12px}
+  .metric{background:var(--card); border:1px solid var(--line); border-radius:9px; padding:15px 14px}
+  .metric .num{font-family:var(--display); font-weight:700; font-size:26px; line-height:1; letter-spacing:-.02em}
+  .metric .num small{font-size:14px; color:var(--muted); font-weight:500}
+  .metric .lab{font-size:11.5px; color:var(--muted); margin-top:7px; line-height:1.4}
+  .metric.ok .num{color:var(--green)}
+  .metric.neg .num{color:var(--red)}
+  .metric.warn .num{color:var(--amber)}
+
+  .curve-card{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:20px 20px 14px; margin-top:6px}
+  .curve-card .ctitle{display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:4px}
+  .curve-card .ctitle h3{font-family:var(--display); font-size:15px; font-weight:600; margin:0}
+  .curve-card .ctitle .note{font-size:12.5px; color:var(--muted)}
+  .curve-card svg{display:block; width:100%; height:auto}
+  .curve-legend{display:flex; gap:18px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); font-family:var(--mono); margin-top:6px}
+  .curve-legend span{display:flex; align-items:center; gap:6px}
+  .swatch{width:18px;height:3px;border-radius:2px;display:inline-block}
+
+  table{width:100%; border-collapse:collapse; font-size:14px; background:var(--card); border:1px solid var(--line); border-radius:9px; overflow:hidden}
+  thead th{background:var(--tint); text-align:left; font-weight:600; font-size:12px; letter-spacing:.04em; color:var(--ink2); padding:11px 14px; border-bottom:1px solid var(--line-strong)}
+  tbody td{padding:10px 14px; border-bottom:1px solid var(--line)}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.total td{background:var(--tint); font-weight:600}
+  td.num,th.num{text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums}
+  .delta-pos{color:var(--green); font-weight:600}
+  .delta-neg{color:var(--ink2)}
+
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px}
+  .panel h3{font-family:var(--display); font-size:15px; font-weight:600; margin:0 0 10px; display:flex; align-items:center; gap:8px}
+  .panel .tag{font-family:var(--mono); font-size:10px; padding:2px 7px; border-radius:4px; background:var(--green-soft); color:var(--green); letter-spacing:.04em}
+  .panel ul{margin:0; padding-left:18px}
+  .panel li{margin:7px 0; font-size:13.8px}
+  .panel p{margin:0; font-size:13.8px; color:var(--ink2)}
+  .kv{display:flex;justify-content:space-between;border-bottom:1px dotted var(--line);padding:7px 0}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--muted)} .kv .vv{font-family:var(--mono)}
+
+  /* 逐款明細表（供人工逐筆核對） */
+  .detail-tools{display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:10px; font-size:12.5px; color:var(--muted)}
+  .detail-scroll{max-height:560px; overflow:auto; border:1px solid var(--line); border-radius:9px}
+  .detail-scroll table{border:none; border-radius:0}
+  .detail-scroll thead th{position:sticky; top:0; z-index:1}
+  .st{font-family:var(--mono); font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap}
+  .st.pass{background:var(--green-soft); color:var(--green); border:1px solid var(--green-line)}
+  .st.other{background:var(--red-soft); color:var(--red); border:1px solid var(--red-line)}
+
+  .flow{counter-reset:step; margin-top:4px}
+  .step{display:grid; grid-template-columns:34px 1fr; gap:14px; padding:11px 0; border-bottom:1px dotted var(--line)}
+  .step:last-child{border-bottom:none}
+  .step::before{counter-increment:step; content:counter(step); font-family:var(--mono); font-weight:600; font-size:13px; color:#fff; background:var(--green); width:24px;height:24px;border-radius:50%; display:flex; align-items:center; justify-content:center}
+  .step .s-t{font-weight:700; font-size:14px; margin-bottom:2px}
+  .step .s-d{font-size:13px; color:var(--ink2)}
+  .step code{font-family:var(--mono); font-size:12px; background:var(--tint); padding:1px 5px; border-radius:3px}
+
+  .recs{counter-reset:rec; margin-top:4px}
+  .rec{display:grid; grid-template-columns:38px 1fr; gap:16px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:11px}
+  .rec::before{counter-increment:rec; content:counter(rec,decimal-leading-zero); font-family:var(--mono); font-weight:600; font-size:15px; color:var(--green); padding-top:1px}
+  .rec h4{margin:0 0 5px; font-size:14.5px; font-weight:700; font-family:var(--body)}
+  .rec p{margin:0; font-size:13.5px; color:var(--ink2)}
+  .rec .tags{margin-top:9px; display:flex; gap:7px; flex-wrap:wrap}
+  .rec .pri{font-family:var(--mono); font-size:10.5px; padding:2px 8px; border-radius:4px; letter-spacing:.03em}
+  .pri.p1{background:var(--red-soft); color:var(--red); border:1px solid var(--red-line)}
+  .pri.p2{background:var(--amber-soft); color:var(--amber); border:1px solid var(--amber-line)}
+  .pri.p3{background:var(--tint); color:var(--ink2); border:1px solid var(--line-strong)}
+  .pri.who{background:#EEF1F4; color:var(--ink2); border:1px solid var(--line)}
+
+  .evid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px}
+  .shot{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:13px 14px}
+  .shot .n{font-family:var(--mono); font-size:11px; color:var(--green); font-weight:600; margin-bottom:5px}
+  .shot .d{font-size:12.5px; color:var(--ink2); line-height:1.45}
+
+  .callout{background:var(--green-soft); border:1px solid var(--green-line); border-radius:9px; padding:14px 18px; font-size:13.8px; color:#16503c; margin-top:14px}
+  .callout b{color:#0c4030}
+  .callout.warn{background:var(--amber-soft); border-color:var(--amber-line); color:#6e430a}
+  .callout.warn b{color:#5a3608}
+
+  footer{margin-top:48px; padding-top:20px; border-top:1px solid var(--line-strong); font-size:12px; color:var(--muted)}
+  footer .files{font-family:var(--mono); font-size:11px; line-height:1.9; margin-top:8px; word-break:break-all}
+  footer code{background:var(--tint); padding:1px 5px; border-radius:3px}
+
+  @media (max-width:760px){
+    .meta-grid{grid-template-columns:repeat(2,1fr)}
+    .metrics{grid-template-columns:repeat(2,1fr)}
+    .grid2{grid-template-columns:1fr}
+    .evid{grid-template-columns:repeat(2,1fr)}
+    .masthead h1{font-size:24px}
+  }
+  @media print{
+    body{background:#fff}
+    .masthead{background:var(--ink)!important; -webkit-print-color-adjust:exact; print-color-adjust:exact}
+    section{break-inside:avoid}
+    .rec,.metric,.panel{break-inside:avoid}
+    .detail-scroll{max-height:none; overflow:visible}
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <p class="kicker">{{KICKER}}</p>
+    <h1>{{H1}}</h1>
+    <p class="sub">{{SUB}}</p>
+    <div class="meta-grid">{{META_ROWS}}</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div class="verdict">{{VERDICT_INNER}}</div>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">01</span><h2>關鍵指標</h2><span class="en">Key Metrics</span></div>
+    <div class="metrics">{{METRICS_INNER}}</div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">02</span><h2>餘額鏈 — 逐筆真實下注的驗證曲線</h2><span class="en">Balance Chain</span></div>
+    {{CURVE_INNER}}
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">03</span><h2>測試方法與覆蓋</h2><span class="en">Method &amp; Coverage</span></div>
+    {{METHOD_INNER}}
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">04</span><h2>輸贏與中獎摘要</h2><span class="en">Results Summary</span></div>
+    {{SUMMARY_INNER}}
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">05</span><h2>逐款明細 — 供人工逐筆核對</h2><span class="en">Per-Game Ledger</span></div>
+    {{DETAIL_INNER}}
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">06</span><h2>證據完整性</h2><span class="en">Evidence Integrity</span></div>
+    {{EVIDENCE_INNER}}
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="sec-no">07</span><h2>建議與後續</h2><span class="en">Recommendations</span></div>
+    <div class="recs">{{RECS_INNER}}</div>
+  </section>
+
+  <footer>{{FOOTER_INNER}}</footer>
+
+</div>
+</body>
+</html>
