@@ -26,6 +26,69 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 
 ## 架構
 
+### 端到端流程（詳細）
+
+涵蓋分支：viewport fail-fast、啟動模式偵測（頁內 iframe／新分頁）、每款驗 delta 的各 status、卡住換新分頁、以及校準耗時的記錄與呈現。
+
+```mermaid
+flowchart TD
+    PREP["👤 使用者準備：開瀏覽器 · 登入 · 視窗滿版 · 停在對的頁"] --> SK["編排層 Skill /test-game-brand<br/>(不導航、不登入，從當前頁接手)"]
+    SK --> MODE{"mode?"}
+
+    %% ---------- calibrate ----------
+    MODE -- "calibrate" --> C0["記 started_at (date)"]
+    C0 --> C1["brand-calibrator 探參數<br/>viewport 唯讀 · SPIN 用餘額變化實測 · 截圖"]
+    C1 --> C2["半互動：關鍵欄位 (SPIN/餘額) 截圖給使用者確認"]
+    C2 --> C3{"探得齊全?"}
+    C3 -- "否" --> CG["寫入 _calibration_gaps<br/>(非空 → 擋住 run)"]
+    C3 -- "是" --> CW["寫 brands/&lt;brand&gt;.yaml"]
+    CW --> C4["記 ended_at → 產 calib-meta.json<br/>(started/ended/seconds, source: measured)"]
+
+    %% ---------- run ----------
+    MODE -- "run" --> R0["讀 location.href = lobby_url<br/>讀 window viewport"]
+    R0 --> RVP{"viewport == yaml.spin.viewport?"}
+    RVP -- "否" --> RFAIL["⛔ fail-fast 停下：請維持滿版或重新 calibrate"]
+    RVP -- "是" --> R1["抓遊戲清單 · 套 --range · 分批 (batch.size)"]
+    R1 --> R2["建 report_dir · 寫 run-meta.json<br/>(嵌最近 calib-meta 的 calibration)"]
+    R2 --> LOOP
+
+    subgraph LOOP["每款迴圈 — game-batch-runner（序列）"]
+      direction TD
+      G1["啟動：點 lobby tile (img alt=遊戲名)"] --> G2{"啟動模式?"}
+      G2 -- "頁內 iframe 覆蓋層" --> G3["等 iframe 出現"]
+      G2 -- "新分頁" --> G3b["browser_tabs 切過去"]
+      G3 --> G4["載入 → 過 intro → 截 bal-before (讀餘額×2)"]
+      G3b --> G4
+      G4 --> G5["記 spin_time → SPIN (canvas 座標點) → 等結算"]
+      G5 --> G6["截 bal-after (讀餘額×2) → delta = after − before"]
+      G6 --> GV{"判定"}
+      GV -- "delta≠0" --> GP["PASS"]
+      GV -- "delta==0" --> GN["SPIN_NO_DELTA"]
+      GV -- "讀不到餘額" --> GU["BAL_UNREADABLE"]
+      GV -- "OOPS 彈窗" --> GO["重試 / OOPS_UNRECOVERED"]
+      GV -- "卡住 / 60s 無回應" --> GS["開新分頁回 lobby_url<br/>STUCK_RECOVERED"]
+      GP --> GX["退出 (回大廳/關 iframe) → append games.jsonl"]
+      GN --> GX
+      GU --> GX
+      GO --> GX
+      GS --> GX
+    end
+
+    LOOP --> AGG["彙整：run-summary.md（逐款明細表）+ games.csv"]
+
+    %% ---------- qa-report ----------
+    AGG --> QA["/qa-report → gen_qa_report.py<br/>讀 games.jsonl + run-meta.calibration"]
+    C4 -. "校準時間供報告" .-> QA
+    QA --> QH[("qa-report.html<br/>裁決 · 指標 · 時間投入(校準vs執行) · 餘額鏈 · 逐款明細 · 證據 · 建議")]
+
+    %% ---------- post ----------
+    MODE -- "post" --> P0["👤 開後台 bet-report · 篩好條件 · 停結果頁"]
+    P0 --> P1["backoffice-reconciler 翻頁讀 + 跟 games.jsonl 對帳"]
+    P1 --> P2[("reconcile.md：matched / missing_in_bo / extra_in_bo + 金額加總")]
+```
+
+🔴 圖中粗節點即四大鐵則落點：**RVP**（滿版/viewport fail-fast）、**GV**（驗餘額才 PASS）、**GS**（卡住換新分頁）、**PREP/SK**（品牌·站點無預設、不導航不登入）。
+
 ### 資料夾結構
 
 ```
