@@ -8,7 +8,7 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 
 ## 輸入
 - `report_dir`：該次 run 的報告資料夾；讀 `report_dir/games.jsonl`，輸出寫 `report_dir/reconcile.md`、截圖寫 `report_dir/backoffice/`。
-- `brand`、`match_keys`（預設 `["name"]`，可加 `bet`）、`amount_tolerance`（預設 0.01）。
+- `brand`、`match_keys`（預設 `["name"]`，可加 `bet`）、`amount_tolerance`（預設 0.01）、`time_tolerance_s`（spin_time↔betTime 窄窗秒數，預設 60）。
 - 你接手時，使用者已停在後台 bet-report 結果頁。
 
 ## 起手檢查（fail-fast）
@@ -24,7 +24,10 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 ## 對帳邏輯
 - 來源 A = `games.jsonl` 裡 `status==PASS` 的款（這些才應該在後台有落單；非 PASS 款另外列，不算 missing）。
 - 來源 B = 後台抓到的落單清單。
-- 依 `match_keys` 配對（預設用遊戲名正規化後比對；`bet` 在 keys 裡時再比下注額，差異在 `amount_tolerance` 內視為相符）。
+- **配對優先序（重要）**：
+  1. 🔴 **`spin_time` 窄時間窗（最可靠，優先用）**：若 games.jsonl 有 `spin_time`，就用它對後台 `betTime` 在 **±60 秒（`time_tolerance_s`，預設 60）** 內配對。兩邊同格式 `YYYY-MM-DD HH:MM:SS`、同時區，下注通常落在 `spin_time` 前後數秒。兩序列都依時間遞增，照順序貪婪配對可避免同名混淆。
+  2. **遊戲名/`game_code` 備援**：時間配不到、或 games.jsonl 沒 `spin_time` 時，才退回 `match_keys`（預設遊戲名正規化；`bet` 在 keys 裡再比下注額，差異在 `amount_tolerance` 內視為相符）。
+  3. 每筆 matched 都**標明用哪種鍵對上**（time / name / bet），寫進 reconcile.md。
 - 算出：
   - **matched**：兩邊都有。
   - **missing_in_bo**：games.jsonl 標 PASS 但後台找不到 → 🔴 最該關注（可能假 PASS、或後台延遲/篩選沒涵蓋）。
@@ -33,9 +36,10 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 
 ## 輸出 reconcile.md
 包含：
-1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率。
-2. **missing_in_bo 表**：idx / 遊戲名 / games.jsonl 的 delta / status / note。🔴 醒目。
+1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率、**主要用哪種鍵配對（time / name）+ 時間窗秒數**。
+2. **missing_in_bo 表**：idx / 遊戲名 / `spin_time` / games.jsonl 的 delta / status / note。🔴 醒目。
 3. **extra_in_bo 表**：後台遊戲名 / bet_amount / time / round_id。
+   - matched 款若需呈現，標明每筆對上的 `spin_time` ↔ 後台 `betTime` 差幾秒、用哪種鍵。
 4. **金額核對**：兩邊總額 + 差異 + 是否在容差內。
 5. **非 PASS 款一覽**：從 games.jsonl 帶出 SPIN_NO_DELTA / BAL_UNREADABLE / OOPS_UNRECOVERED 等，供人工跟進（這些本就不該期待在後台）。
 

@@ -47,18 +47,29 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - `batch.parallel_batches==1`（預設）：**一批跑完再下一批**（共用同一個瀏覽器分頁，不能並行搶滑鼠/座標）。>1 時才考慮多分頁並行（目前保守，先序列）。
 - 每個 batch-runner 自己 append `games.jsonl`；你收集它的回報。
 
-### 6. 彙整報告 `run-summary.md`
-讀 `games.jsonl` 全部行，產出：
+### 6. 彙整報告（讀 `games.jsonl` 全部行，產三份）
+
+**(a) `run-summary.md`**：
 - 總款數、各 status 計數、覆蓋率（跑完款數/總數）。
 - **PASS 款的總 delta**（驗收看這個）。
 - 列出所有非 PASS 款（status + note），方便人工跟進。
 - 🔴 明確標示：PASS 數 = 有確認餘額變化的款數，**不是只 click 成功的款數**。
+- **逐款明細表**（Markdown）：欄位 `編號 / 遊戲名 / 進入前 / 進入後 / delta / 注額 / 中獎 / spin 時間 / 狀態`，一眼看完每款前後金額與下注時刻。
+
+**(b) `report_dir/games.csv`**（Excel 可直接開、可篩選）：
+- 表頭：`idx,name,before_bal,after_bal,delta,bet,win,before_read_time,spin_time,after_read_time,status`
+- 每款一列，順序同 `games.jsonl`。中文名含逗號要正確處理（用引號包裹）；建議用 Bash/`python3` 從 `games.jsonl` 轉出，不要手刻。
+
+**(c)** 既有 `run-meta.json` 不動。
+
+> CSV/明細表的 `win` 與三個時間欄直接取自 `games.jsonl`（game-batch-runner 已寫入）；若舊報告沒有這些欄位，留空即可。
 
 ### run mode 驗收（Test 2）
 使用者開 品牌H 大廳 → `/test-game-brand run brandh --range 1-5` → 預期：
-- `games.jsonl` 5 行、全 `PASS`
-- 每款 `delta ≈ -50`，5 款總 delta ≈ **-250**
-- `screenshots/` 有 g001..g005 的 loaded + spin 共 10 張
+- `games.jsonl` 5 行、全 `PASS`，每行含 `win` / `before_read_time` / `spin_time` / `after_read_time`（三時間遞增、格式 `YYYY-MM-DD HH:MM:SS`）
+- 每款 `delta ≈ -50` 且 `delta ≈ win - bet`，5 款總 delta ≈ **-250**
+- `screenshots/` 有 g001..g005 的 loaded / bal-before / spin / bal-after 共 20 張
+- 產出 `games.csv`，`run-summary.md` 含逐款明細表
 
 ---
 

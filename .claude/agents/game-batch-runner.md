@@ -34,21 +34,23 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 2. **載入**：`browser_wait_for` / 等到 `load_timeout_ms`；再靜置 `post_load_settle_ms`。
 3. **過介紹**：點 `intro.click_xy` 共 `intro.clicks` 次，每次間隔 `intro.interval_ms`。（`intro.clicks==0` 跳過。）
 4. **截圖 loaded**：`browser_take_screenshot` → `screenshots/g{idx}-loaded.png`。
-5. **🔴 BEFORE_BAL = 讀餘額**（見下方「讀餘額」）。讀不到 → status=`BAL_UNREADABLE`，跳到退出。
-6. **SPIN**：click `spin.xy`，等 `spin.settle_ms` 讓結算動畫跑完。
-7. **截圖 spin**：→ `screenshots/g{idx}-spin.png`。
-8. **OOPS 檢查**：若 `oops.selectors` 任一命中（在 `oops.detect_in` 層）：click `oops.dismiss_button`；若 `oops.retry_after_dismiss` 且未超過 `oops.max_retry` → 回到步驟 6 重試一次。仍出現 → status=`OOPS_UNRECOVERED`，跳到退出。
-9. **🔴 AFTER_BAL = 再讀餘額**。讀不到 → `BAL_UNREADABLE`。
+5. **🔴 BEFORE_BAL = 讀餘額**（見下方「讀餘額」）。**讀的當下**用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `before_read_time`。讀不到 → status=`BAL_UNREADABLE`，跳到退出。
+6. **SPIN**：點 `spin.xy` 的**那一刻**先用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `spin_time`（這是日後對帳要對後台 `betTime` 的關鍵時間，務必貼近點擊瞬間），再 click。等 `spin.settle_ms` 讓結算動畫跑完。
+7. **截圖 spin + 讀中獎**：截圖 → `screenshots/g{idx}-spin.png`；同時從畫面讀 **LAST WIN / WIN 數字**（與餘額同為 canvas，視覺判讀）記為 `win`（無中獎=0）。
+8. **OOPS 檢查**：若 `oops.selectors` 任一命中（在 `oops.detect_in` 層）：click `oops.dismiss_button`；若 `oops.retry_after_dismiss` 且未超過 `oops.max_retry` → 回到步驟 6 重試一次（重試會更新 `spin_time`）。仍出現 → status=`OOPS_UNRECOVERED`，跳到退出。
+9. **🔴 AFTER_BAL = 再讀餘額**。**讀的當下**用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `after_read_time`。讀不到 → `BAL_UNREADABLE`。
 10. **🔴 驗 delta**：`delta = AFTER_BAL - BEFORE_BAL`。
     - `delta != 0`（通常 ≈ `-bet.default`）→ status=`PASS`。
     - `delta == 0` → status=`SPIN_NO_DELTA`（**絕對不准標 PASS**）。
+    - **自我校驗**：`delta` 應 ≈ `win - bet`（未中獎 `win=0` → `delta≈-bet`；中獎 → `delta=win-bet`）。明顯不符就把實際數字記進 `note`（可能餘額讀錯或漏讀 win），不要硬標 PASS。
 11. **退出**：click `exit.parent_trigger`；若 `exit.modal_confirm` 非 null 再 click 它；等 `exit.wait_after_ms` 回到大廳。
 12. **記錄**：append 一行 JSON 到 `games.jsonl`（用 Bash 或 Write 追加），欄位見下。
 
 ## 讀餘額（兩段式，canvas 也要讀得到）
 1. **先試文字**：`balance.source==dom` 用 `browser_evaluate`/`browser_snapshot` 取頁面文字；`==iframe` 試讀該 iframe 文字。用 `balance.text_pattern`（regex，capture group 1 = 金額）抽數字。
-2. **讀不到就截圖用眼睛讀**：很多遊戲（如 品牌H）餘額畫在 Canvas/WebGL 上，文字層讀不到。改 `browser_take_screenshot` 餘額所在區域，**你直接從圖片視覺判讀數字**，並驗證它符合 `text_pattern` 的格式（如 `B 950.00`）。
-3. **不穩定就重讀**：動畫未停時數字會跳；最多重讀 `balance.retry_reads` 次，取穩定值。
+2. **讀不到就截圖用眼睛讀**：很多遊戲（如 品牌H、品牌B）餘額畫在 Canvas/WebGL 上，文字層讀不到。改 `browser_take_screenshot` 餘額所在區域，**你直接從圖片視覺判讀數字**，並驗證它符合 `text_pattern` 的格式（如 `B 950.00`）。
+   - **截圖一律存檔當證據**：讀 BEFORE 存 `screenshots/g{idx}-bal-before.png`、讀 AFTER 存 `screenshots/g{idx}-bal-after.png`（即使用文字讀到，也截一張存證）。這樣每款固定有 4 張圖：`loaded` / `bal-before` / `spin` / `bal-after`，四張都要列進該款的 `screenshots` 欄位。
+3. **不穩定就重讀**：動畫未停時數字會跳；最多重讀 `balance.retry_reads` 次，取穩定值（讀兩次一致才採用）。
 4. 兩段都拿不到合法數字 → 回 null（呼叫端標 `BAL_UNREADABLE`）。
 
 ## 🔴🔴 CRITICAL RULE（這是整個專案存在的理由）
@@ -62,9 +64,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 ## games.jsonl 每行格式
 ```json
-{"idx":1,"id":"g001","name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-spin.png"],"note":""}
+{"idx":1,"id":"g001","name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"win":0.00,"before_read_time":"2026-06-18 03:28:40","spin_time":"2026-06-18 03:28:45","after_read_time":"2026-06-18 03:28:55","oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-bal-before.png","g001-spin.png","g001-bal-after.png"],"note":""}
 ```
-status 合法值：`PASS` / `SPIN_NO_DELTA` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪）。
+- `win`：本轉中獎金額（LAST WIN，無中獎=0）；應滿足 `delta ≈ win - bet`。
+- `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。
+- `screenshots`：固定 4 張 `loaded` / `bal-before` / `spin` / `bal-after`。
+
+status 合法值：`PASS` / `SPIN_NO_DELTA` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪、`delta≈win-bet` 不符等）。dry_run 時 `win`/三個時間可留 null。
 
 ## 回報給呼叫端
 跑完整批，回傳：處理款數、各 status 計數、PASS 的總 delta、以及任何需要 calibrate 補的觀察（例如「餘額只能靠截圖讀，建議 balance.source 標記」）。**據實回報，跑不完或不確定就說，不要美化。**
