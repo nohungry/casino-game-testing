@@ -14,6 +14,8 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 ## 探測流程
 依 `brands/_schema.yaml` 的欄位逐項探，每欄記下：**proposed 值 + 信心度(high/med/low) + 怎麼得到的**。
 
+> 🕒 **一接手就先** Bash `date '+%Y-%m-%d %H:%M:%S'` 記下 `started_at`，**全部探完回傳前**再記 `ended_at`，一起回報（這是「座標計算與判定」耗時，編排層會寫進 calib-meta.json／報告）。
+
 1. **viewport（唯讀，禁止 resize）**：用 `browser_evaluate` 讀當前 `window.innerWidth/innerHeight`，記為 `spin.viewport`。**絕對不可呼叫 `browser_resize`**；本專案一律靠「視窗滿版」維持一致。校準前請確認瀏覽器已滿版（編排層會提醒使用者）；你只記錄當下實際大小，run 時會比對它。所有座標都相對此 viewport，務必記準。
 2. **載入/靜置**：觀察並給 `load_timeout_ms`、`post_load_settle_ms` 的保守值（不確定就給寬鬆預設並標 med）。
 3. **intro**：截圖看是否有 splash/intro/CLICK TO CONTINUE。試點畫面中央，數要點幾次才進到可玩畫面 → `intro.clicks` / `click_xy` / `interval_ms`。
@@ -47,4 +49,5 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `needs_confirm`：你建議務必請使用者眼睛確認的項目（至少含 spin.xy 截圖、balance 讀法）。
 - `calibration_gaps`：探不到、要人工補的欄位清單。
 - `screenshots`：截圖檔名清單。
+- `timing`：`{"started_at":..., "ended_at":...}`（你接手與探完的時刻，供編排層算校準耗時）。
 據實回報，不確定就說不確定。

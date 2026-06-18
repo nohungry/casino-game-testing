@@ -57,6 +57,37 @@ def esc(s):
     return html.escape(str(s if s is not None else ""))
 
 
+def parse_dt(s):
+    import datetime
+    try:
+        return datetime.datetime.strptime(str(s), "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def dur_seconds(start, end):
+    """兩個 'YYYY-MM-DD HH:MM:SS' 字串相差秒數；無法解析或負值 → None。"""
+    a, b = parse_dt(start), parse_dt(end)
+    if a and b:
+        d = (b - a).total_seconds()
+        return d if d >= 0 else None
+    return None
+
+
+def fmt_dur(sec):
+    """秒 → 人類可讀時長：Xh Ym / Xm Ys / Xs；None → —。"""
+    if sec is None or not num(sec):
+        return "—"
+    sec = int(round(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
 def code_of(g, glist_by_idx):
     e = glist_by_idx.get(g.get("idx"))
     if e and e.get("code"):
@@ -237,6 +268,48 @@ def main():
         f'<div class="metric {c}"><div class="num">{v}</div><div class="lab">{esc(l)}</div></div>'
         for c, v, l in metrics)
 
+    # ---- 區塊：時間投入（座標校準 vs 測試執行）----
+    calib = meta.get("calibration") or {}
+    calib_seconds = calib.get("seconds")
+    if calib_seconds is None:
+        calib_seconds = dur_seconds(calib.get("started_at"), calib.get("ended_at"))
+    calib_src = calib.get("source", "")
+    calib_vp = calib.get("viewport")
+    calib_vp_s = f"{calib_vp[0]}×{calib_vp[1]}" if isinstance(calib_vp, list) and len(calib_vp) == 2 else (vp or "")
+
+    bts = [g["before_read_time"] for g in games if g.get("before_read_time")]
+    ats = [g["after_read_time"] for g in games if g.get("after_read_time")]
+    exec_started = min(bts) if bts else (spins[0] if spins else None)
+    exec_ended = max(ats) if ats else (spins[-1] if spins else None)
+    exec_seconds = dur_seconds(exec_started, exec_ended)
+    per_game_seconds = (exec_seconds / total) if (exec_seconds is not None and total) else None
+    amort = (calib_seconds / total) if (calib_seconds is not None and total) else None
+
+    NUMCSS = "font-family:var(--display);font-weight:700;font-size:30px;line-height:1;letter-spacing:-.02em"
+    if calib_seconds is not None:
+        calib_sub = (f"viewport {calib_vp_s}　·　首次校準（SPIN／餘額／退出座標與判定）"
+                     + ("　·　<i>由產物時間回推、為近似值</i>" if calib_src == "reconstructed" else ""))
+    else:
+        calib_sub = "本次 run 未記錄校準時間（calibrate／run 升級後會自動帶入）"
+    exec_sub = (f"每款平均 ~{fmt_dur(per_game_seconds)}　·　首款 before → 末款 after"
+                if exec_seconds is not None else "games.jsonl 無逐款讀取時間，無法計時")
+    if calib_seconds is not None and exec_seconds is not None:
+        callout_time = (f"<b>校準是一次性成本：</b>本次「座標校準·判定」約 <b>{fmt_dur(calib_seconds)}</b>，"
+                        f"換來 {total} 款共 <b>{fmt_dur(exec_seconds)}</b> 的逐款驗餘額執行（每款 ~{fmt_dur(per_game_seconds)}）。"
+                        f"同站、同 viewport 下校準參數可重複沿用，攤提到每款約 <b>{fmt_dur(amort)}</b>；"
+                        f"款數越多、單位校準成本越低。本次合計投入約 {fmt_dur(calib_seconds + exec_seconds)}。")
+    else:
+        callout_time = "校準或執行時間其一缺漏，僅顯示可得部分；資料補齊後本區塊會自動完整。"
+    time_inner = (
+        '<div class="grid2">'
+        '<div class="panel"><h3>座標校準 · 判定 <span class="tag">一次性</span></h3>'
+        f'<div style="{NUMCSS};color:var(--amber)">{fmt_dur(calib_seconds)}</div>'
+        f'<p style="margin-top:8px">{calib_sub}</p></div>'
+        f'<div class="panel"><h3>測試執行 <span class="tag">{total} 款</span></h3>'
+        f'<div style="{NUMCSS};color:var(--green)">{fmt_dur(exec_seconds)}</div>'
+        f'<p style="margin-top:8px">{exec_sub}</p></div></div>'
+        f'<div class="callout">{callout_time}</div>')
+
     # ---- 區塊：curve ----
     curve = build_curve_svg(games)
     if curve:
@@ -385,6 +458,7 @@ def main():
         "{{META_ROWS}}": meta_rows,
         "{{VERDICT_INNER}}": verdict_inner,
         "{{METRICS_INNER}}": metrics_inner,
+        "{{TIME_INNER}}": time_inner,
         "{{CURVE_INNER}}": co,
         "{{METHOD_INNER}}": method_inner,
         "{{SUMMARY_INNER}}": summary_inner,
@@ -406,6 +480,9 @@ def main():
         "chain_breaks": nbreak, "screenshots": nshots, "wins": wins,
         "net_delta": net, "start_bal": start_bal, "end_bal": end_bal,
         "has_spin_time": has_time, "time_range": time_range,
+        "calib_seconds": calib_seconds, "calib_source": calib_src or None,
+        "exec_seconds": exec_seconds,
+        "per_game_seconds": round(per_game_seconds, 1) if per_game_seconds is not None else None,
     }, ensure_ascii=False))
 
 

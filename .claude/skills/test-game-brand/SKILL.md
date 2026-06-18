@@ -40,6 +40,8 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - `reports/<brand>-<YYYYMMDD-HHMM>/`，內含 `screenshots/`。
 - 時間戳用 `date +%Y%m%d-%H%M`（Bash 取，不要自己編）。
 - 寫一個 `run-meta.json`：brand、lobby_url、range、總款數、batch size、起始時間。
+- 🕒 **嵌校準時間（供 qa-report 呈現「校準 vs 執行」）**：找該品牌最近一個 `reports/<brand>-calib-*/calib-meta.json`，把它整包塞進 run-meta 的 `calibration` 欄（保留 `source`）。找不到就略過此欄（報告會顯示「—」，不阻擋）。範例：
+  `run-meta.json` 內 `"calibration": {"started_at":...,"ended_at":...,"seconds":...,"viewport":[W,H],"source":"measured"}`。
 
 ### 5. 切批 + 派發 game-batch-runner
 - 依 `batch.size`（預設 8）把清單切成數批。
@@ -81,6 +83,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 ### 1. 準備
 - 若 `brands/<brand>.yaml` 已存在 → 提示會覆蓋，先問使用者要不要續校準。
 - 建 `reports/<brand>-calib-<YYYYMMDD-HHMM>/` 放探測截圖（時間戳用 `date` 取）。
+- 🕒 **記校準起點**：用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `calib_started_at`（這是「座標計算與判定」耗時的起點，報告會用）。
 
 ### 2. 派發 brand-calibrator 探測
 - spawn `brand-calibrator`（subagent_type: `brand-calibrator`），給 `brand`、`calib_dir`。
@@ -96,7 +99,12 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 ### 4. 寫入 yaml
 - 確認後的值寫 `brands/<brand>.yaml`（符合 `_schema.yaml` 結構）。
 - 仍未確定的欄位 → 留在 `_calibration_gaps`（**非空代表此 yaml 還不能 run**，明確告知使用者要補哪些才能跑 run）。
-- 落地後回報：哪些 high/med/low、gaps 還剩什麼、下一步可否直接 `run`。
+- 🕒 **記校準終點 + 產 calib-meta.json**：寫完 yaml 後用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `calib_ended_at`，在 `calib_dir/` 產 `calib-meta.json`：
+  ```json
+  {"brand":"<brand>","viewport":[W,H],"started_at":"<calib_started_at>","ended_at":"<calib_ended_at>","seconds":<差秒數>,"source":"measured","sample_game":"<sample 名(code)>"}
+  ```
+  （`source:"measured"` 代表當場實記；秒數用 Bash/python 由起訖相減，不要心算。這份供 `run`／`qa-report` 呈現「座標校準·判定耗時」。）
+- 落地後回報：哪些 high/med/low、gaps 還剩什麼、校準耗時、下一步可否直接 `run`。
 
 ### calibrate mode 驗收（Test 1）
 使用者開一款 品牌H sample → `/test-game-brand calibrate brandh` → 產出 `brands/brandh.yaml`，其中 `spin.xy` 接近 **(1283, 857)**、`spin.viewport` 記錄了當下 viewport、balance 讀法有著落。
