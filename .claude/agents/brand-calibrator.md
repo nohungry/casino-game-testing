@@ -9,6 +9,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 ## 輸入
 - `brand`：品牌 slug。
 - `report_dir` 或 `calib_dir`：截圖落地的資料夾（探測截圖寫這裡）。
+  - 🔴 **截圖路徑規則**：呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<calib_dir>/<名稱>.png`（如 `loaded.png` 寫成 `<calib_dir>/loaded.png`）。**裸檔名會被寫進 repo 根、到處散落**（見 CLAUDE.md）。
 - 你接手時，sample 遊戲已在當前分頁載入完成。
 
 ## 探測流程

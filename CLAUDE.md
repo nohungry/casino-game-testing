@@ -28,3 +28,4 @@
 - 開跑測試前**先確認已登入**（頁面還有「登入」鈕＝未登入，讀不到餘額就不能驗 PASS）。
 - SPIN 後要**等中獎動畫結算完**再讀餘額（讀兩次一致才算）；大廳錢包是快取，delta 以**遊戲內餘額**為準。
 - canvas/iframe 遊戲沒有可選元素，SPIN 等按鈕用座標點 `page.mouse.click(x,y)`（`browser_run_code_unsafe`），`browser_click` 對 canvas 無效。
+- 🔴 **測試產物一律歸位到 `report_dir/`，不准落在 repo 根**：`browser_take_screenshot` 的 `filename` 一律給**完整路徑** `report_dir/screenshots/<名稱>.png`（對帳頁截圖給 `report_dir/backoffice/`）。**裸檔名（如 `x.png`）會被寫到 MCP 的 cwd＝repo 根、到處散落**。無 report_dir 的一次性探測，截到暫存目錄或 calib_dir，也**不要落在 repo 根**。截圖、CSV、TSV、暫存 HTML 等所有中繼檔同理。（`reports/` 與根層影像已 gitignore，但仍要主動歸位，別靠 ignore 兜底。）

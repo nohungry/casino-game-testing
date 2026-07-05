@@ -8,6 +8,7 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 
 ## 輸入
 - `report_dir`：該次 run 的報告資料夾；讀 `report_dir/games.jsonl`，輸出寫 `report_dir/reconcile.md`、截圖寫 `report_dir/backoffice/`。
+  - 🔴 **截圖路徑規則**：後面寫的 `backoffice/page-NN.png` 是簡寫，實際呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<report_dir>/backoffice/page-NN.png`。**裸檔名會被寫進 repo 根、到處散落**（見 CLAUDE.md）。抓下來的 bo-raw、reconcile 中繼檔同理，一律寫 `report_dir/` 底下。
 - `brand`、`match_keys`（預設 `["name"]`，可加 `bet`）、`amount_tolerance`（預設 0.01）、`time_tolerance_s`（spin_time↔betTime 窄窗秒數，預設 60）。
 - 你接手時，使用者已停在後台 bet-report 結果頁。
 

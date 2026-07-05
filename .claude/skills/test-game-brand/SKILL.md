@@ -145,6 +145,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - 🔴 **注單單號（bet_id）是對帳的唯一可靠鍵**：前台常看不到注單單號，對帳時由 `backoffice-reconciler` 從後台擷取每筆 `bet_id` 釘回 games.jsonl（`bo_betid`/`bo_winlose`），並交叉驗證「遊戲內 delta == 後台輸贏」。
 - 🔴 **卡住換新分頁**：60s 無回應 → 新 tab 從 `lobby_url` 重啟，標 `STUCK_RECOVERED`，不在原頁 debug。
 - 🔴 **滿版、不 resize**：座標一律靠「瀏覽器滿版」維持一致。**所有 mode、所有 subagent 都不准呼叫 `browser_resize` 或任何改視窗大小的工具**（程式 resize 會有顯示問題）。viewport 一律「讀+比對」，不一致 fail-fast。跑前提醒使用者把視窗滿版且過程中別動。
+- 🔴 **測試產物一律歸位 `report_dir/`，不落 repo 根**：截圖 `browser_take_screenshot` 的 `filename` 一律給**完整路徑** `report_dir/screenshots/<名稱>.png`；對帳頁截圖給 `report_dir/backoffice/`；校準圖給 `calib_dir/`。**裸檔名會被寫進 repo 根、散落一地**（見 CLAUDE.md 操作慣例）。編排層 spawn subagent 時務必傳入 `report_dir` **絕對路徑**，並要求「所有截圖/中繼檔用該路徑為前綴」。
 
 ## 邊界
 本 Skill **不**負責導航、登入、開後台、選篩選條件 —— 那是使用者跑前的責任。頁面對不上就 fail-fast 提示，不要替使用者操作站點。**post mode 尤其要先提醒使用者手動開好後台 bet-report 並篩好條件。**

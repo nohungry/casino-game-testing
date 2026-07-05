@@ -11,6 +11,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `lobby_url`：run 起始時記下的大廳 URL（卡住時用來開新分頁回大廳）。
 - `games`：你這批要跑的清單，每項含 `idx`(全域序號)、`name`、`nth`。
 - `report_dir`：報告資料夾絕對路徑；截圖寫 `report_dir/screenshots/`，結果 append `report_dir/games.jsonl`。
+  - 🔴 **截圖路徑規則**：本文後面寫的 `screenshots/g{idx}-*.png` 都是簡寫，實際呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<report_dir>/screenshots/g{idx}-*.png`。**給裸檔名會被寫進 MCP 的 cwd（＝repo 根）、到處散落**。所有中繼檔（截圖/暫存）同理，不落 repo 根。
 - `flags`：可能含 `retry_oops`、`dry_run`。
 
 ## 起手（整批只做一次）
