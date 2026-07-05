@@ -50,10 +50,11 @@ tools: Read, Write, Bash
    - `recommendations`：依本批實況給 2–4 條，`pri` 用 `P1/P2/P3`，`owner` 預設 QA。
    - **若有非 PASS 款或餘額鏈斷點**：verdict 要如實點出（chip 用非全綠語氣），並在建議裡點名要追的款。**不要美化成全 PASS。**
 
-3. **跑產生器**（從專案根目錄）：
+3. **跑產生器**（從專案根目錄，**用 `uv run` 跑在專案 `.venv`／Python 3.13**）：
    ```bash
-   python3 .claude/skills/qa-report/gen_qa_report.py "<report_dir>" --input "<report_dir>/qa-report-input.json" --reviewer "<reviewer>"
+   uv run .claude/skills/qa-report/gen_qa_report.py "<report_dir>" --input "<report_dir>/qa-report-input.json" --reviewer "<reviewer>"
    ```
+   - `uv` 若不在 PATH：先 `export PATH="$HOME/.local/bin:$PATH"`。極端情況（無 uv）可退回 `python3 …`（腳本純標準庫，任何 Python 3 皆可跑）。
    - 它會輸出 `report_dir/qa-report.html` 並印出一行 JSON（total/pass/abnormal/chain_breaks/screenshots/wins/net_delta…）。
    - 若腳本報錯（缺 games.jsonl 等）→ 如實回報，不要硬造 HTML。
 

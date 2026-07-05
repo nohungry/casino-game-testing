@@ -38,8 +38,13 @@ description: 把一次 run 的測試結果產成「QA Manager 視角」的單檔
 
 ## 相依檔案（本 skill 自帶）
 - `.claude/skills/qa-report/gen_qa_report.py`：確定性產生器（讀 games.jsonl + run-meta + full-game-list + input.json，算指標/SVG/明細表，套模板輸出 HTML）。
+- `.claude/skills/qa-report/gen_detail_only.py`：只含「逐款明細表」的滿版獨立報告（`--names` 可帶前台遊戲名對照 JSON，鍵＝img 代碼）。
 - `.claude/skills/qa-report/qa-report-template.html`：HTML 模板（CSS + 區塊骨架 + 佔位符）。
 - subagent `qa-report-writer`：編排「讀資料 → 寫 input.json → 跑腳本」。
+
+## 執行環境
+- 產生器**用 `uv run` 跑在專案 `.venv`（Python 3.13）**，例如 `uv run .claude/skills/qa-report/gen_qa_report.py <report_dir> …`。首次或 clone 後先 `uv sync` 建環境；`uv` 不在 PATH 時 `export PATH="$HOME/.local/bin:$PATH"`。
+- 腳本**純標準庫、零第三方依賴**，故無 uv 時退回 `python3 …` 也能跑（見 README「Python 環境（uv）」）。
 
 ## 驗收
 對一個既有 run（如 `reports/品牌B-fullrerun-20260616-0326/`）跑 `/qa-report` → 產 `qa-report.html`：單檔可離線開、指標與 `run-summary.md` 一致、餘額鏈曲線點數＝款數、逐款明細表列數＝款數且可逐筆對照遊戲序列表。

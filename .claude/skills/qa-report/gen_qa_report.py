@@ -158,6 +158,23 @@ def main():
     if not os.path.exists(games_path):
         sys.exit(f"ERROR: 找不到 {games_path}（請先跑 run）")
     games = sorted(load_jsonl(games_path), key=lambda g: g.get("idx", 0))
+    # 欄位正規化：容忍 run 端 schema 差異，缺正規欄時用別名補（不覆蓋既有值）。
+    _ALIAS = {
+        "status": ("verdict",),
+        "before_bal": ("bal_before",),
+        "after_bal": ("bal_after",),
+        "name": ("game",),
+        "win": ("win_gross",),
+        "spin_time": ("bet_time",),
+        "betid": ("bo_betid", "bo_betids"),
+    }
+    for g in games:
+        for canon, aliases in _ALIAS.items():
+            if g.get(canon) in (None, ""):
+                for al in aliases:
+                    if g.get(al) not in (None, ""):
+                        g[canon] = g[al]
+                        break
     meta = load_json(os.path.join(rd, "run-meta.json"), {}) or {}
     glist_raw = load_json(os.path.join(rd, "full-game-list.json"), {}) or {}
     glist = (glist_raw.get("games") if isinstance(glist_raw, dict) else glist_raw) or []
@@ -383,6 +400,14 @@ def main():
         f'<div class="panel"><h3>加轉／重試確認 <span class="tag">SOP 落實 · 無假 PASS</span></h3><ul>{mc_html}</ul></div>')
 
     # ---- 區塊：逐款明細表 ----
+    def fmt_betid(g):
+        b = g.get("betid")
+        if b in (None, ""):
+            return ""
+        if isinstance(b, (list, tuple)):
+            return ", ".join(str(x) for x in b if x not in (None, ""))
+        return str(b)
+
     drows = []
     for g in games:
         st = g.get("status", "?")
@@ -399,15 +424,18 @@ def main():
             f'<td class="num {d_cls}">{signed(d) if num(d) else ""}</td>'
             f'<td class="num">{money(g.get("win")) if num(g.get("win")) else ""}</td>'
             f'<td class="num">{esc(g.get("spin_time") or "")}</td>'
+            f'<td class="betid">{esc(fmt_betid(g))}</td>'
             f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
             "</tr>")
     detail_inner = (
-        '<div class="detail-tools">逐款下注前後餘額與 SPIN 時間，順序同遊戲序列表（idx）；'
-        '可對照大廳逐筆核對。共 ' + str(total) + ' 款。</div>'
+        '<style>.detail-scroll td.betid{font-family:ui-monospace,Menlo,Consolas,monospace;'
+        'font-size:11px;color:var(--muted);white-space:nowrap;word-break:keep-all}</style>'
+        '<div class="detail-tools">逐款下注前後餘額、SPIN 時間與後台注單號，順序同遊戲序列表（idx）；'
+        '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。</div>'
         '<div class="detail-scroll"><table><thead><tr>'
         '<th class="num">編號</th><th class="num">代碼</th><th>遊戲名</th>'
         '<th class="num">進入前</th><th class="num">進入後</th><th class="num">delta</th>'
-        '<th class="num">中獎</th><th class="num">SPIN 時間</th><th>狀態</th>'
+        '<th class="num">中獎</th><th class="num">SPIN 時間</th><th>注單號</th><th>狀態</th>'
         '</tr></thead><tbody>' + "".join(drows) + '</tbody></table></div>')
 
     # ---- 區塊：evidence ----
