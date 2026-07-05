@@ -1,6 +1,6 @@
 ---
 name: game-batch-runner
-description: 批次執行 8-10 款第三方電子遊戲：進入→載入→過介紹→讀餘額→SPIN→再讀餘額→驗 delta→退出，每款 append 一行 games.jsonl。由 test-game-brand 的 run mode 派發，不自己導航/登入。
+description: 批次執行 8-10 款第三方電子遊戲：進入→載入→過介紹→讀餘額→下注(依遊戲類型:SPIN/crash/keno…)→再讀餘額→驗 delta→退出，每款 append 一行 games.jsonl。由 test-game-brand 的 run mode 派發，不自己導航/登入。
 tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_click, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_wait_for, mcp__playwright__browser_evaluate, mcp__playwright__browser_run_code_unsafe, mcp__playwright__browser_tabs, mcp__playwright__browser_press_key, mcp__playwright__browser_hover, Read, Write, Bash
 ---
 
@@ -23,6 +23,16 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - **大廳/站台 DOM 元素**（遊戲卡、回大廳鈕、確認彈窗…）：用 `browser_click`（element ref / selector）。卡片若 hover 才出「選擇」鈕、或普通 click 被覆蓋層攔截，改用 `browser_evaluate` 對卡片元素 `.click()`（事件冒泡啟動）。
 - **遊戲內的 SPIN / 過介紹 / 遊戲內按鈕**：第三方電子常是 **canvas/WebGL 畫在跨網域 iframe** 上，**沒有可選元素**，只能用**座標點擊** `page.mouse.click(x,y)`（透過 `browser_run_code_unsafe`）。`browser_click` 對 canvas 無效。座標一律相對當前 viewport（見起手的 viewport 驗證）。
 
+## 下注動作：依遊戲類型臨場判斷（不只 SPIN）
+「下注」不是只有拉霸的 SPIN。**啟動後先判斷這款是哪種類型**，用對應方式下一注（注額用 `bet.default`，並遵守下方「投注額上限」鐵則），不要假設一律是 SPIN。把判到的類型記進該款 `note`（不固化成站點預設）。常見三類：
+- **拉霸 / slot**：點 `spin.xy`（或畫面 SPIN 鈕座標）一次＝一注。
+- **crash / 即時倍率類**（下注→倍率上升→崩潰前兌現）：**只有在「下注窗口（回合間倒數）」點下注鈕才生效**；點完要**確認鈕變成「取消/兌現」狀態**才算成立（還是原本「下注」就是沒中窗口，等下一輪重點）。為求穩定 delta，**不要兌現，讓它崩潰＝輸掉整注**（delta = −bet）。注意有的有「兩注面板」，只下一注就好；「全押/all-in」之類會押整個餘額，**絕不要點**。
+- **keno / 選號·即時開獎類**：要**先在號盤選至少一個號，再按下注鈕**，且**選號與按下注要在同一個動作序列內快速做完**（中間隔一次開獎/倒數歸零會把選號清空）。下注後等該局開獎才結算；開獎間隔依款（如 1 分/2 分版）。同樣**避開「全押」**。
+
+**🔴 確認下注真的成立（所有類型共用）**：下注鈕點下去≠下注成功。讀 AFTER 餘額前，先確認其一：鈕狀態改變（變取消/兌現/鎖定）、出現「已下注」提示、當前投注列出現本注、或餘額已即時扣款。**沒確認成立就重點一次（crash 等下一個窗口；keno 重新選號+下注）**；連續失敗才記 `BET_NOT_PLACED`。沒成立就讀 delta 會得到假 0。下注遇「交易錯誤/window closed」多半是按晚了（窗口已關），等下一個窗口重下，不是失敗。
+
+**🔴🔴 即時/快開獎遊戲：讀 AFTER 餘額一定要「等開獎結算完」**：crash/keno/sicbo/hilo/penalty 等是**下注先扣注金、中獎金在開獎那一刻才入帳**。若一下注就立刻讀餘額，只會抓到「扣注」這半段，餘額看起來像 −bet，**中獎會被當成輸**（實測 SIC BO 三注全中卻被讀成 −9，HILO 中 +30 被讀成 −6）。所以：下注後**務必等到該局開獎/崩潰/結算動畫跑完、餘額穩定（讀兩次一致）才當 AFTER**；fast-settle 遊戲尤其別搶讀。最終以**後台注單 `輸/贏` 為準**，遊戲內 delta 與後台 wl 不一致時，幾乎都是「讀太早漏了中獎金」——以後台為準並把 note 記清楚。
+
 ## 每款遊戲流程（嚴格照順序）
 對 `games` 裡每一款 `g`：
 
@@ -35,7 +45,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 3. **過介紹**：點 `intro.click_xy` 共 `intro.clicks` 次，每次間隔 `intro.interval_ms`。（`intro.clicks==0` 跳過。）
 4. **截圖 loaded**：`browser_take_screenshot` → `screenshots/g{idx}-loaded.png`。
 5. **🔴 BEFORE_BAL = 讀餘額**（見下方「讀餘額」）。**讀的當下**用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `before_read_time`。讀不到 → status=`BAL_UNREADABLE`，跳到退出。
-6. **SPIN**：點 `spin.xy` 的**那一刻**先用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `spin_time`（這是日後對帳要對後台 `betTime` 的關鍵時間，務必貼近點擊瞬間），再 click。等 `spin.settle_ms` 讓結算動畫跑完。
+6. **下注**（依「下注動作：依遊戲類型臨場判斷」那節決定怎麼下）：按下注鈕的**那一刻**先用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `spin_time`（＝下注時刻，日後對帳要對後台 `betTime` 的關鍵時間，務必貼近點擊瞬間），再點。**確認下注成立**（見該節 🔴），然後等結算（slot 等 `spin.settle_ms`；crash 等崩潰；keno 等該局開獎）跑完。
 7. **截圖 spin + 讀中獎**：截圖 → `screenshots/g{idx}-spin.png`；同時從畫面讀 **LAST WIN / WIN 數字**（與餘額同為 canvas，視覺判讀）記為 `win`（無中獎=0）。
 8. **OOPS 檢查**：若 `oops.selectors` 任一命中（在 `oops.detect_in` 層）：click `oops.dismiss_button`；若 `oops.retry_after_dismiss` 且未超過 `oops.max_retry` → 回到步驟 6 重試一次（重試會更新 `spin_time`）。仍出現 → status=`OOPS_UNRECOVERED`，跳到退出。
 9. **🔴 AFTER_BAL = 再讀餘額**。**讀的當下**用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `after_read_time`。讀不到 → `BAL_UNREADABLE`。
@@ -70,7 +80,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。
 - `screenshots`：固定 4 張 `loaded` / `bal-before` / `spin` / `bal-after`。
 
-status 合法值：`PASS` / `SPIN_NO_DELTA` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪、`delta≈win-bet` 不符等）。dry_run 時 `win`/三個時間可留 null。
+status 合法值：`PASS` / `SPIN_NO_DELTA` / `BET_NOT_PLACED` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。（`BET_NOT_PLACED`＝下注鈕點了但未確認成立，連重試都沒成功；不可標 PASS。）`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪、`delta≈win-bet` 不符等）。dry_run 時 `win`/三個時間可留 null。
 
 ## 回報給呼叫端
 跑完整批，回傳：處理款數、各 status 計數、PASS 的總 delta、以及任何需要 calibrate 補的觀察（例如「餘額只能靠截圖讀，建議 balance.source 標記」）。**據實回報，跑不完或不確定就說，不要美化。**
