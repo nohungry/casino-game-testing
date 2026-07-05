@@ -4,7 +4,7 @@
 細節文件：使用說明見 [`README.md`](README.md)，完整架構見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。
 
 ## 這個專案是什麼
-第三方電子遊戲平台的**批次測試自動化**：Skill `/test-game-brand`（calibrate 探參數 / run 批次跑+驗餘額 / post 對帳）+ 三個 subagent（game-batch-runner、brand-calibrator、backoffice-reconciler）。
+第三方電子遊戲平台的**批次測試自動化**：Skill `/test-game-brand`（calibrate 探參數 / run 批次跑+驗餘額 / post 對帳）+ Skill `/qa-report`（產 HTML 報告，`--simple` 精簡版）+ 四個 subagent（game-batch-runner、brand-calibrator、backoffice-reconciler、qa-report-writer）。
 
 ## 核心不變量（不可違反）
 - **品牌無預設、站點無預設** — repo 不存任何品牌參數、帳號、網址。
@@ -12,6 +12,8 @@
 - **驗餘額才能 PASS** — 只 click SPIN 不驗餘額變化＝假 PASS。`delta==0` / 讀不到 / 不確定一律不准 PASS（先前 65 款翻車根因）。
 - **滿版、不 resize** — 座標靠瀏覽器滿版維持一致；**一律不呼叫 `browser_resize`**。viewport 只「讀+比對」，不一致 fail-fast。
 - **卡住換新分頁** — 60s 無回應 → 開新 tab 從 lobby URL 重啟，標 `STUCK_RECOVERED`，不在原頁 debug。
+
+（「不 resize」與「截圖歸位」兩條已由 `.claude/settings.json` 的 PreToolUse hook **機器強制**：`browser_resize` 一律 deny、裸檔名截圖一律 deny。被擋到就照提示改，不要繞。）
 
 ## Git commit 規範
 - 🔴 **commit 訊息絕不加任何 Claude / AI 署名**（不加 `Co-Authored-By: Claude`、不加 `🤖 Generated with Claude Code`）。用 `/git-commit` skill 會自動遵守。

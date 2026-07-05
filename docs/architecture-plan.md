@@ -97,25 +97,35 @@ flowchart TD
 ├── .gitignore                             # brands/*.yaml、reports/、tmp/、settings.local.json
 ├── .mcp.json                              # playwright + chrome-devtools，不寫死 CDP URL
 ├── .claude/
+│   ├── settings.json                      # 團隊共用 hooks（禁 resize / 截圖歸位 / hooksPath 自動設定）
 │   ├── settings.local.json                # 權限允許（gitignored，每人本機）
 │   ├── skills/
-│   │   └── test-game-brand/
-│   │       └── SKILL.md
-│   └── agents/
+│   │   ├── test-game-brand/SKILL.md
+│   │   ├── qa-report/                     # SKILL.md + gen_qa_report.py + report_common.py
+│   │   │                                  #   + gen_detail_only.py + qa-report-template.html
+│   │   └── git-commit/SKILL.md
+│   └── agents/                            # 四個 subagent
 │       ├── game-batch-runner.md
 │       ├── brand-calibrator.md
-│       └── backoffice-reconciler.md
+│       ├── backoffice-reconciler.md
+│       └── qa-report-writer.md
+├── hooks/pre-commit                        # git hook（呼叫 secret-scan；core.hooksPath=hooks）
+├── scripts/
+│   ├── secret-scan.sh                      # 進版前敏感掃描
+│   └── claude-hooks/                       # Claude Code PreToolUse/SessionStart hook 腳本
 ├── brands/
 │   ├── _schema.yaml                       # 欄位定義（git track，給 AI 對照）
 │   └── _template.yaml                     # 空白範本（git track）
 │   # brands/<brand>.yaml                   # AI 校準產出（gitignored）
 ├── docs/
-│   └── architecture-plan.md
+│   ├── architecture-plan.md
+│   └── acceptance-fixtures.md             # 歷史驗收基準（具體品牌/數值集中在這）
+├── pyproject.toml / uv.lock / .python-version   # uv 管的 Python 3.13 環境（零第三方依賴）
 └── reports/<brand>-<YYYYMMDD-HHMM>/        # 全 gitignored
     ├── run-summary.md
-    ├── games.jsonl
-    ├── reconcile.md
-    ├── screenshots/g{NNN}-{loaded|spin|oops}.png
+    ├── games.jsonl / games.csv / full-game-list.json / run-meta.json
+    ├── reconcile.md / qa-report.html / qa-report-simple.html
+    ├── screenshots/g{NNN}-{loaded|bal-before|spin|bal-after}.png
     └── backoffice/
 ```
 
@@ -129,9 +139,9 @@ flowchart TD
 | `run` | `run brandh` | 停在該 brand 的遊戲列表頁 | 讀當前頁 URL（記為 lobby URL）→ 抓遊戲清單 → 切批 → spawn batch-runner → 彙整報告 |
 | `post` | `post brandh` | 開後台 bet-report、篩好條件 | 讀當前頁資料 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
 
-擴充 flag：`--range a-b`、`--resume-from g042`、`--retry-oops`、`--dry-run`。
+擴充 flag：`--range a-b`、`--resume-from g042`、`--dry-run`。
 
-### 三個 Subagent
+### 四個 Subagent
 
 **1. `game-batch-runner`** — 批次執行 8-10 款。
 
@@ -152,9 +162,11 @@ locate img[alt=name].nth(n)  → load (load_timeout_ms)
 
 **2. `brand-calibrator`** — 跑 1 款 sample，回傳完整 brand yaml。SPIN 找不到時 ±50px 8 方向重試最多 6 次，仍失敗就寫 `_calibration_gaps` 請使用者人工確認，**禁止用 default 偷渡**（65 款翻車根因）。
 
-互動程度 TBD（全自動 / 半互動 / 全手動），到 calibrate 實作前敲定。
+互動程度已定案：**半互動**（AI 自動探測、關鍵欄位截圖給使用者確認後才寫 yaml；Step 7 敲定）。
 
-**3. `backoffice-reconciler`** — 從**當前已開好的後台 bet-report 頁**讀資料（不導航、不篩選 — 使用者已準備好）。翻頁抓 snapshot → 比對 `games.jsonl` → 產 `reconcile.md`（含 missing_in_bo / extra_in_bo 兩張表）。
+**3. `backoffice-reconciler`** — 從**當前已開好的後台 bet-report 頁**讀資料（不導航、不篩選 — 使用者已準備好）。翻頁抓 snapshot → 比對 `games.jsonl`（配對優先序 `betid` 精準 join ＞ `code`/slug ＞ 名稱/語義 ＞ 時間窗最後手段）→ 釘回注單號 → 產 `reconcile.md`（含 missing_in_bo / extra_in_bo 兩張表）。
+
+**4. `qa-report-writer`** — 讀一次 run 的 report_dir，草擬 QA Manager 裁決/建議寫 `qa-report-input.json`，跑 `gen_qa_report.py`（`--variant full|simple`）產單檔 HTML 報告。數字一律由腳本算，AI 只寫敘述。由 `/qa-report` skill 派發。
 
 ### Brand config schema（`brands/_schema.yaml`，是文件、不是真資料）
 
@@ -215,12 +227,12 @@ QA 上手 5 步：
 
 ### ✅ Step 4（已完成 2026-06-03）：`game-batch-runner` subagent（最關鍵）
 - ✅ `.claude/agents/game-batch-runner.md`
-- ✅ 起手 browser_resize 鎖 viewport；確認在大廳
+- ✅ 起手驗 viewport；確認在大廳（原設計是 browser_resize 鎖定，後由下方「跨 Step 修正」改為**滿版＋讀比對 fail-fast、禁止 resize**）
 - ✅ per-game 流程：進入→載入→介紹→BEFORE_BAL→SPIN→AFTER_BAL→驗 delta→退出→append jsonl
 - ✅ CRITICAL RULE 焊死（無 delta 不准 PASS）
 - ✅ 讀餘額兩段式 fallback：DOM/iframe 文字 → 讀不到改 take_screenshot 視覺判讀（解 Canvas/WebGL 讀不到問題）
 - ✅ 新增 status `BAL_UNREADABLE`（讀不到 ≠ delta 為 0，病因不同要分開）+ `DRY_RUN`
-- ✅ Stuck rule（60s→新分頁回 lobby_url）、dry_run、retry_oops
+- ✅ Stuck rule（60s→新分頁回 lobby_url）、dry_run（OOPS 重試後改由 yaml `oops.retry_after_dismiss` 控制，`--retry-oops` flag 已移除）
 - 驗收（搭 Step 5 live 跑）
 
 ### ✅ Step 5（已完成 2026-06-03，待 live 驗收）：SKILL.md `run` mode
@@ -242,7 +254,7 @@ QA 上手 5 步：
 - `game-batch-runner` / `brand-calibrator`：移除 `browser_resize` 工具；viewport 改「讀+比對」(run 不一致 fail-fast) / 「唯讀記錄」(calibrate)。
 - `_schema.yaml` spin.viewport 語義改為「校準當下實際 viewport，run 比對非 resize」；座標與機器/螢幕綁定（本來就 per-machine）。
 - SKILL.md 新增第三鐵則「滿版、不 resize」；calibrate/run 前提加「視窗已滿版」。
-- ⚠️ `settings.local.json` 還殘留 `browser_resize` / `resize_page` 兩條 allow（auto-mode 擋了我移除）——是無效 dead rule（agent tools 已移除才是真管控），請使用者自行刪掉。
+- ✅ `settings.local.json` 曾殘留的 `browser_resize` / `resize_page` 兩條 allow 已清除（2026-07 確認）；另 `.claude/settings.json` 已加 PreToolUse hook 把 resize 從「自律」升級成「機器擋下」。
 
 ### ✅ Step 7（已完成 2026-06-03，待 live 驗收）：`brand-calibrator` + SKILL.md `calibrate` mode
 - ✅ 互動程度敲定：**半互動**（AI 自動探測 + 關鍵欄位截圖給使用者確認後才寫 yaml）
@@ -266,7 +278,7 @@ QA 上手 5 步：
 
 ## 關鍵風險與防呆
 
-- **viewport 一致性**：MCP 自啟 Chromium 預設 viewport 不一定符合 calibrate 時。brand yaml 必須鎖 viewport、subagent 起手 `browser_resize` 強制設定
+- **viewport 一致性**：MCP 自啟 Chromium 預設 viewport 不一定符合 calibrate 時。策略＝**一律滿版**（`viewport=null` + `--start-maximized`），brand yaml 記校準當下 viewport，subagent 起手**只讀+比對、不一致 fail-fast**；`browser_resize` 已被 hook 硬擋
 - **假 PASS 防線**：CRITICAL RULE 在 batch-runner prompt 強調「無 balance delta 不准 PASS」
 - **stuck tab**：60s 無回應直接開新 tab、navigate 到 run 開始時記下的 lobby URL（[[feedback-new-tab-on-stuck]]）
 - **calibrate fallback**：找不到 SPIN 座標時不准用 default 偷渡，必須寫 `_calibration_gaps` 請使用者確認
@@ -275,6 +287,6 @@ QA 上手 5 步：
 
 ## 未決事項
 
-- calibrate 模式互動程度（到 Step 7 前敲定）
-- 後台對帳細節（使用者後續再想）
+- ~~calibrate 模式互動程度~~ → 已定案**半互動**（Step 7，2026-06-03）
+- ~~後台對帳細節~~ → 已定案配對優先序 `betid` ＞ `code` ＞ 名稱/語義 ＞ 時間窗（2026-06-29 品牌G 48/48 實證，見 `backoffice-reconciler.md`）
 - session 持久化（暫不加 `--user-data-dir`，看實際使用體驗再決定）

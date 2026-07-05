@@ -8,8 +8,8 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 
 ## 輸入
 - `report_dir`：該次 run 的報告資料夾；讀 `report_dir/games.jsonl`，輸出寫 `report_dir/reconcile.md`、截圖寫 `report_dir/backoffice/`。
-  - 🔴 **截圖路徑規則**：後面寫的 `backoffice/page-NN.png` 是簡寫，實際呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<report_dir>/backoffice/page-NN.png`。**裸檔名會被寫進 repo 根、到處散落**（見 CLAUDE.md）。抓下來的 bo-raw、reconcile 中繼檔同理，一律寫 `report_dir/` 底下。
-- `brand`、`match_keys`（預設 `["name"]`，可加 `bet`）、`amount_tolerance`（預設 0.01）、`time_tolerance_s`（spin_time↔betTime 窄窗秒數，預設 60）。
+  - 🔴 **截圖路徑規則**（CLAUDE.md 鐵則；裸檔名已被 PreToolUse hook 硬擋）：後面的 `backoffice/page-NN.png` 是簡寫，實際 `filename` 一律給完整路徑 `<report_dir>/backoffice/page-NN.png`；bo-raw、reconcile 中繼檔同理，一律寫 `report_dir/` 底下。
+- `brand`、`amount_tolerance`（預設 0.01）、`time_tolerance_s`（spin_time↔betTime 窄窗秒數，預設 60）。配對鍵不用外部指定——依下方「配對優先序」自行選 games.jsonl 裡最可靠的鍵。
 - 你接手時，使用者已停在後台 bet-report 結果頁。
 
 ## 起手檢查（fail-fast）
@@ -21,18 +21,21 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 ## 抓後台資料（翻頁）
 1. 從當前頁用 `browser_snapshot`/`browser_evaluate` 抓表格列：每列盡量取 **`bet_id`（注單單號，🔴 最重要——這是唯一可靠的對帳鍵）**、`game_name`/`platform`、`bet_amount`、`win_amount`/`輸贏`(有的話)、`time`(投注日期)、`round_id`(有的話)。
    - ⚠️ **欄位對齊表頭再讀**：注單欄常含「詳情」鈕，會讓 td 索引整列位移；先抓表頭文字定位各欄，別硬套固定 index。
-2. 有分頁就翻：找「下一頁」鈕 click → `browser_wait_for` 換頁 → 再抓，直到沒有下一頁或頁碼到底。每頁截一張 `backoffice/page-NN.png`。
+2. 有分頁就翻：找「下一頁」鈕 click → `browser_wait_for` 換頁 → 再抓，直到沒有下一頁或頁碼到底。每頁截一張 `backoffice/page-NN.png`。**翻頁前先看有沒有「每頁顯示」選項，能調大（如 100）就調大**——全部同頁可免翻頁、也免分頁鈕被彈窗遮住。
+   - 🔴 **開/關詳情彈窗只用 Escape 或直接點下一筆讓它替換，絕不要用 `browser_evaluate` 刪 DOM 節點關彈窗**——會弄壞前端框架的彈窗掛載點，之後整頁詳情都開不出來，只剩重載能修（而重載會清掉使用者篩選＝違反鐵則）。
 3. 翻頁找不到/卡住：抓到多少算多少，但在報告裡**明確標示「後台只抓到前 N 頁，可能不完整」**，不要假裝抓全。
 4. 彙總成 BO 清單。
 
 ## 對帳邏輯
 - 來源 A = `games.jsonl` 裡 `status==PASS` 的款（這些才應該在後台有落單；非 PASS 款另外列，不算 missing）。
 - 來源 B = 後台抓到的落單清單。
-- **配對優先序（重要）**：
-  1. 🔴 **`spin_time` 窄時間窗（最可靠，優先用）**：若 games.jsonl 有 `spin_time`，就用它對後台 `betTime` 在 **±60 秒（`time_tolerance_s`，預設 60）** 內配對。兩邊同格式 `YYYY-MM-DD HH:MM:SS`、同時區，下注通常落在 `spin_time` 前後數秒。兩序列都依時間遞增，照順序貪婪配對可避免同名混淆。
-  2. **遊戲名/`game_code` 備援**：時間配不到、或 games.jsonl 沒 `spin_time` 時，才退回 `match_keys`（預設遊戲名正規化；`bet` 在 keys 裡再比下注額，差異在 `amount_tolerance` 內視為相符）。
-  3. 每筆 matched 都**標明用哪種鍵對上**（time / name / bet），寫進 reconcile.md。
-- 🔴 **配對成功就把後台 `bet_id`（注單單號）+ 後台輸贏釘回紀錄**：寫回 `games.jsonl` 對應款的 `bo_betid` / `bo_winlose` 欄（前台常看不到注單單號，後台這顆才是日後追單的唯一可靠鍵）。並**交叉驗證**：遊戲內 `delta` 應等於後台 `輸贏`（輸＝−bet、中獎＝+淨額）；不符就標出，不要當對上。
+- **配對優先序（🔴 實戰定案：精準鍵優先，時間窗是最後手段）**：
+  1. 🔴 **`betid` 精準 join（最可靠）**：games.jsonl 已記 `betid`（玩完即對帳流程、或前次對帳釘回）時，直接對後台注單單號逐筆 join——2026-06 實測 48/48 全對，勝過一切模糊比對。
+  2. **`code`/slug 精準比對**：games.jsonl 有 `code` 且後台有遊戲代碼/英文 slug 時，用它 join（同款多注再用時間排序分配）。
+  3. **遊戲名／語義佐證**：名稱正規化比對；後台表格沒有遊戲名欄時，遊戲名常藏在每列「詳情」彈窗（如 `GameName:<简中名>`），可開彈窗做語義佐證（繁簡/翻譯對照要保守，存疑就標出）。
+  4. **`spin_time` 窄時間窗（最後手段）**：以上都不可用才退回 `spin_time`↔`betTime` ±`time_tolerance_s` 配對，且必須「兩序列時間遞增、照順序貪婪配對＋嚴格邊界」，並在 reconcile.md **標明方法限制**（鬆散時間對齊在跨午夜、重複局、校準殘留時容易比錯——2026-06-15 曾因此誤判缺單）。
+  5. 每筆 matched 都**標明用哪種鍵對上**（betid / code / name / time），寫進 reconcile.md。
+- 🔴 **配對成功就把後台注單單號 + 後台輸贏釘回紀錄**：寫回 `games.jsonl` 對應款的 `betid` / `bo_winlose` 欄（前台常看不到注單單號，後台這顆才是日後追單的唯一可靠鍵）。並**交叉驗證**：遊戲內 `delta` 應等於後台 `輸贏`（輸＝−bet、中獎＝+淨額）；不符就標出，不要當對上。
 - 算出：
   - **matched**：兩邊都有。
   - **missing_in_bo**：games.jsonl 標 PASS 但後台找不到 → 🔴 最該關注（可能假 PASS、或後台延遲/篩選沒涵蓋）。
@@ -41,8 +44,8 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
 
 ## 輸出 reconcile.md
 包含：
-1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率、**主要用哪種鍵配對（time / name）+ 時間窗秒數**。
-2. **matched 表**：idx / 遊戲名 / `spin_time`↔後台 `betTime`(差幾秒) / 用哪種鍵 / **注單單號 `bet_id`** / 遊戲內 delta vs 後台輸贏(是否一致)。🔴 注單單號是這份報告的主要交付物。
+1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率、**主要用哪種鍵配對（betid / code / name / time）**；若退到時間窗要寫明秒數與方法限制。
+2. **matched 表**：idx / 遊戲名 / `spin_time`↔後台 `betTime`(差幾秒) / 用哪種鍵 / **注單單號 `betid`** / 遊戲內 delta vs 後台輸贏(是否一致)。🔴 注單單號是這份報告的主要交付物。
 3. **missing_in_bo 表**：idx / 遊戲名 / `spin_time` / games.jsonl 的 delta / status / note。🔴 醒目（區分「真缺」與「疑後台延遲未回報」）。
 4. **extra_in_bo 表**：後台遊戲名 / bet_amount / time / `bet_id` / round_id。
 5. **金額核對**：兩邊總額 + 差異 + 是否在容差內。

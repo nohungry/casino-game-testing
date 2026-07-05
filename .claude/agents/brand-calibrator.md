@@ -8,8 +8,8 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 ## 輸入
 - `brand`：品牌 slug。
-- `report_dir` 或 `calib_dir`：截圖落地的資料夾（探測截圖寫這裡）。
-  - 🔴 **截圖路徑規則**：呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<calib_dir>/<名稱>.png`（如 `loaded.png` 寫成 `<calib_dir>/loaded.png`）。**裸檔名會被寫進 repo 根、到處散落**（見 CLAUDE.md）。
+- `calib_dir`：截圖落地的資料夾（探測截圖寫這裡；編排層一律用這個名字傳入）。
+  - 🔴 **截圖路徑規則**（CLAUDE.md 鐵則；裸檔名已被 PreToolUse hook 硬擋）：`filename` 一律給完整路徑 `<calib_dir>/<名稱>.png`（如 `loaded.png` 寫成 `<calib_dir>/loaded.png`）。
 - 你接手時，sample 遊戲已在當前分頁載入完成。
 
 ## 探測流程
@@ -17,7 +17,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 > 🕒 **一接手就先** Bash `date '+%Y-%m-%d %H:%M:%S'` 記下 `started_at`，**全部探完回傳前**再記 `ended_at`，一起回報（這是「座標計算與判定」耗時，編排層會寫進 calib-meta.json／報告）。
 
-1. **viewport（唯讀，禁止 resize）**：用 `browser_evaluate` 讀當前 `window.innerWidth/innerHeight`，記為 `spin.viewport`。**絕對不可呼叫 `browser_resize`**；本專案一律靠「視窗滿版」維持一致。校準前請確認瀏覽器已滿版（編排層會提醒使用者）；你只記錄當下實際大小，run 時會比對它。所有座標都相對此 viewport，務必記準。
+1. **viewport（唯讀；CLAUDE.md 鐵則不 resize，`browser_resize` 已被 hook 硬擋）**：用 `browser_evaluate` 讀當前 `window.innerWidth/innerHeight`，記為 `spin.viewport`。你只記錄當下實際大小（校準前編排層會提醒使用者滿版），run 時會比對它。所有座標都相對此 viewport，務必記準。
 2. **載入/靜置**：觀察並給 `load_timeout_ms`、`post_load_settle_ms` 的保守值（不確定就給寬鬆預設並標 med）。
 3. **intro**：截圖看是否有 splash/intro/CLICK TO CONTINUE。試點畫面中央，數要點幾次才進到可玩畫面 → `intro.clicks` / `click_xy` / `interval_ms`。
 4. **🔴 spin.xy（最關鍵）**：
