@@ -97,18 +97,35 @@ uv run .claude/skills/qa-report/gen_detail_only.py <report_dir> --names <對照>
 - **目前零第三方依賴**（純標準庫）；未來要寫 `.xlsx` / 接 Google Sheets API 時 `uv add openpyxl` / `uv add gspread` 即可。
 - 無 uv 時可退回 `python3 <script>`（腳本純標準庫，任何 Python 3 皆可跑）。
 
-### 安全防線：進版前敏感掃描（clone 後一次性啟用）
+### 安全防線：進版前敏感掃描
 避免把本機路徑、密碼/token/金鑰、或誤加的敏感檔（截圖 / `reports/` / `.mcp.json` / `brands/<brand>.yaml`）commit 進 repo。
 
 ```bash
-git config core.hooksPath hooks        # 啟用 pre-commit 掃描（每個 clone 各做一次）
+git config core.hooksPath hooks        # 啟用 pre-commit 掃描（在 Claude Code 內開過 session 會自動設好）
 bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 ```
 
 - 啟用後每次 `git commit` 會自動跑 `scripts/secret-scan.sh` 掃暫存區，命中就擋下。
+- 在 Claude Code 內開 session 時，SessionStart hook（`scripts/claude-hooks/ensure-git-hookspath.sh`）會自動檢查並補設 `core.hooksPath`，新 clone 忘了設也不會漏防。
 - `/git-commit` skill 也會在提交前先掃一次。
 - 確認為誤判可 `git commit --no-verify` 略過（請先人工確認）。
 - ⚠️ 掃描器抓不到「站點/帳號/品牌被硬編進通用程式或文件」這種（值合法、但不該入 repo）——這類靠 code review 與 CLAUDE.md 核心不變量把關。
+
+### 鐵則機器強制（Claude Code hooks，隨 repo 生效）
+`.claude/settings.json`（團隊共用、已 commit）掛了三個 hook，把 CLAUDE.md 幾條鐵則從「自律」升級成「機器擋下」：
+
+| Hook | 觸發 | 行為 |
+|------|------|------|
+| deny-resize | `browser_resize` / `resize_page` | 一律 deny（鐵則：滿版不 resize） |
+| check-screenshot-path | `browser_take_screenshot` 等截圖工具 | 檔名缺省或裸檔名（不含路徑）→ deny，要求給 `report_dir/screenshots/…` 完整路徑；chrome-devtools 不落地的 inline 截圖放行 |
+| ensure-git-hookspath | SessionStart | 自動補設 `core.hooksPath=hooks`（見上節） |
+
+腳本在 `scripts/claude-hooks/`，用 bash + python3 標準庫。已在 WSL(Linux) 驗證；**Windows 原生（非 WSL）環境未驗證**，若 hook 報錯請回報。
+
+#### macOS 試跑檢查表（未在 macOS 實測，請照此驗一輪）
+1. `bash scripts/secret-scan.sh --all` — 系統 bash 3.2 能跑完（已移除 `mapfile` 依賴，但未實機驗證）。
+2. 建一個含 `/Users/<你的帳號>/` 路徑的暫存檔 `git add` 後 `bash scripts/secret-scan.sh` — 應被擋下（macOS home 路徑 pattern）。
+3. 在 Claude Code 內叫一次裸檔名截圖 — 應被 deny 並收到歸位提示。
 
 ---
 
@@ -122,7 +139,7 @@ bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 | `run <brand>` | 停在該品牌的遊戲列表頁 | 讀當前 URL（記為 lobby）→ 抓遊戲清單 → 切批 → 跑 → 驗餘額 → 出報告 |
 | `post <brand>` | 開後台 bet-report、篩好條件 | 讀當前頁 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
 
-擴充 flag：`--range a-b`、`--resume-from g042`、`--retry-oops`、`--dry-run`。
+擴充 flag：`--range a-b`、`--resume-from g042`、`--dry-run`。
 
 ---
 

@@ -13,11 +13,15 @@ mode="${1:-staged}"
 self="scripts/secret-scan.sh"
 fail=0
 
+# 不用 mapfile：macOS 系統 bash 3.2 沒有，跨平台用 while read 收集
+files=()
 if [ "$mode" = "--all" ]; then
-  mapfile -t files < <(git ls-files)
+  # --all 讀「工作目錄」內容做全庫體檢（staged 模式讀 index，兩者語義不同：
+  # 體檢看的是現況檔案，未 add 的改動也會掃到）
+  while IFS= read -r _f; do files+=("$_f"); done < <(git ls-files)
   getcontent() { cat "$1" 2>/dev/null; }
 else
-  mapfile -t files < <(git diff --cached --name-only --diff-filter=ACM)
+  while IFS= read -r _f; do files+=("$_f"); done < <(git diff --cached --name-only --diff-filter=ACM)
   getcontent() { git show ":$1" 2>/dev/null; }
 fi
 
@@ -50,7 +54,8 @@ for f in "${files[@]}"; do
   printf '%s' "$content" | grep -Iq . 2>/dev/null || continue   # 二進位跳過
 
   hits="$(printf '%s\n' "$content" | grep -nE \
-      -e '/home/[a-z0-9_][a-z0-9_.-]*/' \
+      -e '/home/[A-Za-z0-9_][A-Za-z0-9_.-]*/' \
+      -e '/Users/[A-Za-z0-9_][A-Za-z0-9_.-]*/' \
       -e '/mnt/c/Users/[^/[:space:]]+' \
       -e 'C:\\Users\\[^\\[:space:]]+' \
       -e '(password|passwd|secret|api[_-]?key|apikey|access[_-]?key|auth[_-]?token|client_secret)[[:space:]]*[:=]' \
