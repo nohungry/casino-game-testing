@@ -1,0 +1,17 @@
+[project]
+name = "casino-game-testing"
+version = "0.1.0"
+description = "第三方電子遊戲平台批次測試自動化 — QA 報告產生器等 Python 工具"
+requires-python = ">=3.13"
+dependencies = []
+
+# 目前的報告產生器（.claude/skills/qa-report/gen_qa_report.py、gen_detail_only.py）
+# 純 Python 標準庫、零第三方依賴，故 dependencies 為空。
+# 未來若要「真的寫 .xlsx / 接 Google Sheets API」，用：
+#   uv add openpyxl      # 產 Excel
+#   uv add gspread       # 直接寫 Google 試算表
+# 加入後 uv 會自動更新此檔與 uv.lock。
+
+[tool.uv]
+# 這個 repo 是「一組工具腳本」而非可安裝套件，不需 build backend。
+package = false

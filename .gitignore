@@ -8,8 +8,22 @@ reports/
 tmp/
 *.log
 
+# 根目錄的臨時截圖/影像（測試過程 browser_take_screenshot 落在 repo 根，屬 scratch，不入 repo）
+# 只擋根層（前置 /），docs/ 等子目錄的正式圖不受影響
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+/*.bmp
+
 # Playwright MCP 執行工件（snapshot / console log）
 .playwright-mcp/
+
+# Python 環境（uv）：.venv 不入 repo；pyproject.toml / uv.lock / .python-version 要 commit（給團隊重現）
+.venv/
+__pycache__/
+*.pyc
 
 # OS / IDE
 .DS_Store

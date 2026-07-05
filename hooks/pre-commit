@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pre-commit hook：進版前跑 secret-scan，命中疑似敏感內容/檔案即擋下 commit。
+# 啟用方式（clone 後一次性）：git config core.hooksPath hooks
+# 誤判時可 'git commit --no-verify' 略過（請先人工確認）。
+exec "$(git rev-parse --show-toplevel)/scripts/secret-scan.sh"
