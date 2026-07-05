@@ -12,7 +12,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 /test-game-brand <mode> <brand> [flags]
   mode  : calibrate | run | post
   brand : 品牌 slug（小寫），對應 brands/<brand>.yaml
-  flags : --range a-b  --resume-from gNNN  --retry-oops  --dry-run
+  flags : --range a-b  --resume-from gNNN  --dry-run
 ```
 先判斷 `<mode>`，照對應段落做。`<brand>` 沒給就先問使用者，不要亂猜。
 
@@ -33,14 +33,15 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 
 ### 3. 抓遊戲清單
 - 用 `browser_snapshot` 或 `browser_evaluate`，依 `launch.selector_pattern` 抓出當前頁所有遊戲（名稱 + 出現順序）。
-- 建立清單：`idx`(從 1 起的全域序號)、`name`、`nth`(同名第幾個)。
+- 建立清單：`idx`(從 1 起的全域序號)、`name`、`nth`(同名第幾個)、`code`(遊戲代碼，能從卡片圖檔路徑/啟動參數抓到就記——它是對帳與報告的可靠 join 鍵；抓不到留 null)。
 - 套用 `--range a-b`（只留序號 a..b）與 `--resume-from gNNN`（從該序號起）。
-- 把抓到的清單與總數回報給使用者確認數量合理（例如 品牌H 應 ~247）。
+- 把抓到的清單與總數回報給使用者確認數量合理。
 
 ### 4. 建報告資料夾
 - `reports/<brand>-<YYYYMMDD-HHMM>/`，內含 `screenshots/`。
 - 時間戳用 `date +%Y%m%d-%H%M`（Bash 取，不要自己編）。
 - 寫一個 `run-meta.json`：brand、lobby_url、range、總款數、batch size、起始時間。
+- 🔴 **把 step 3 抓到的完整清單（含 range 外的全部）寫成 `report_dir/full-game-list.json`**：`{"games":[{"idx":1,"name":"…","nth":0,"code":"…"},…]}`。qa-report 的「代碼」欄與對帳的 join 都靠它；不寫這檔，代碼欄會退化成純序號。
 - 🕒 **嵌校準時間（供 qa-report 呈現「校準 vs 執行」）**：找該品牌最近一個 `reports/<brand>-calib-*/calib-meta.json`，把它整包塞進 run-meta 的 `calibration` 欄（保留 `source`）。找不到就略過此欄（報告會顯示「—」，不阻擋）。範例：
   `run-meta.json` 內 `"calibration": {"started_at":...,"ended_at":...,"seconds":...,"viewport":[W,H],"source":"measured"}`。
 
@@ -57,10 +58,10 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - **PASS 款的總 delta**（驗收看這個）。
 - 列出所有非 PASS 款（status + note），方便人工跟進。
 - 🔴 明確標示：PASS 數 = 有確認餘額變化的款數，**不是只 click 成功的款數**。
-- **逐款明細表**（Markdown）：欄位 `編號 / 遊戲名 / 進入前 / 進入後 / delta / 注額 / 中獎 / spin 時間 / 狀態`，一眼看完每款前後金額與下注時刻。
+- **逐款明細表**（Markdown）：欄位 `編號 / 代碼 / 遊戲名 / 進入前 / 進入後 / delta / 注額 / 中獎 / spin 時間 / 注單號 / 狀態`（與 qa-report 明細表同欄位；注單號 run 完通常空白，post 對帳釘回後重產才有值）。
 
 **(b) `report_dir/games.csv`**（Excel 可直接開、可篩選）：
-- 表頭：`idx,name,before_bal,after_bal,delta,bet,win,before_read_time,spin_time,after_read_time,status`
+- 表頭：`idx,code,name,before_bal,after_bal,delta,bet,win,before_read_time,spin_time,after_read_time,betid,status`
 - 每款一列，順序同 `games.jsonl`。中文名含逗號要正確處理（用引號包裹）；建議用 Bash/`python3` 從 `games.jsonl` 轉出，不要手刻。
 
 **(c)** 既有 `run-meta.json` 不動。
@@ -68,11 +69,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 > CSV/明細表的 `win` 與三個時間欄直接取自 `games.jsonl`（game-batch-runner 已寫入）；若舊報告沒有這些欄位，留空即可。
 
 ### run mode 驗收（Test 2）
-使用者開 品牌H 大廳 → `/test-game-brand run brandh --range 1-5` → 預期：
-- `games.jsonl` 5 行、全 `PASS`，每行含 `win` / `before_read_time` / `spin_time` / `after_read_time`（三時間遞增、格式 `YYYY-MM-DD HH:MM:SS`）
-- 每款 `delta ≈ -50` 且 `delta ≈ win - bet`，5 款總 delta ≈ **-250**
-- `screenshots/` 有 g001..g005 的 loaded / bal-before / spin / bal-after 共 20 張
-- 產出 `games.csv`，`run-summary.md` 含逐款明細表
+歷史驗收基準（含具體品牌/數值）見 `docs/acceptance-fixtures.md`——具體值屬歷史紀錄、非預設，勿當校準參數用。
 
 ---
 
@@ -84,7 +81,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 ### 1. 準備
 - 若 `brands/<brand>.yaml` 已存在 → 提示會覆蓋，先問使用者要不要續校準。
 - 建 `reports/<brand>-calib-<YYYYMMDD-HHMM>/` 放探測截圖（時間戳用 `date` 取）。
-- 🕒 **記校準起點**：用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `calib_started_at`（這是「座標計算與判定」耗時的起點，報告會用）。
+- 🕒 **記校準起點（fallback 用）**：用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `calib_started_at`。校準時間的**主真源是 calibrator 回傳的 `timing`**（步驟 4），這份自記值只在它缺漏時當備援。
 
 ### 2. 派發 brand-calibrator 探測
 - spawn `brand-calibrator`（subagent_type: `brand-calibrator`），給 `brand`、`calib_dir`。
@@ -100,15 +97,15 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 ### 4. 寫入 yaml
 - 確認後的值寫 `brands/<brand>.yaml`（符合 `_schema.yaml` 結構）。
 - 仍未確定的欄位 → 留在 `_calibration_gaps`（**非空代表此 yaml 還不能 run**，明確告知使用者要補哪些才能跑 run）。
-- 🕒 **記校準終點 + 產 calib-meta.json**：寫完 yaml 後用 Bash `date '+%Y-%m-%d %H:%M:%S'` 取 `calib_ended_at`，在 `calib_dir/` 產 `calib-meta.json`：
+- 🕒 **產 calib-meta.json（時間單一真源＝calibrator 回傳的 `timing`）**：起訖優先取 calibrator 回傳的 `timing.started_at/ended_at`；calibrator 沒回傳才用步驟 1 自記的 `calib_started_at` ＋ 當下 `date` 當備援。在 `calib_dir/` 產：
   ```json
-  {"brand":"<brand>","viewport":[W,H],"started_at":"<calib_started_at>","ended_at":"<calib_ended_at>","seconds":<差秒數>,"source":"measured","sample_game":"<sample 名(code)>"}
+  {"brand":"<brand>","viewport":[W,H],"started_at":"<started_at>","ended_at":"<ended_at>","seconds":<差秒數>,"source":"measured","sample_game":"<sample 名(code)>"}
   ```
   （`source:"measured"` 代表當場實記；秒數用 Bash/python 由起訖相減，不要心算。這份供 `run`／`qa-report` 呈現「座標校準·判定耗時」。）
 - 落地後回報：哪些 high/med/low、gaps 還剩什麼、校準耗時、下一步可否直接 `run`。
 
 ### calibrate mode 驗收（Test 1）
-使用者開一款 品牌H sample → `/test-game-brand calibrate brandh` → 產出 `brands/brandh.yaml`，其中 `spin.xy` 接近 **(1283, 857)**、`spin.viewport` 記錄了當下 viewport、balance 讀法有著落。
+歷史驗收基準見 `docs/acceptance-fixtures.md`——內含的座標是**當年那台機器的實測值，絕非預設座標**，勿拿來校準。
 
 ## Mode: `post`（Step 6，已實作）
 
@@ -125,15 +122,16 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - 讀該 `report_dir/games.jsonl`。沒有或空 → 提示先跑 `run`。
 
 ### 3. 派發 backoffice-reconciler
-- spawn `backoffice-reconciler`（subagent_type: `backoffice-reconciler`），給 `report_dir`、`brand`、`match_keys`（預設 `["name"]`，使用者要嚴格比對可加 `bet`）、`amount_tolerance`（預設 0.01）。
+- spawn `backoffice-reconciler`（subagent_type: `backoffice-reconciler`），給 `report_dir`、`brand`、`amount_tolerance`（預設 0.01）。
+- 配對鍵由 reconciler 依優先序自行選用（`betid` 精準 join ＞ `code`/slug ＞ 名稱/語義佐證 ＞ 時間窗最後手段），games.jsonl 記了什麼就用最可靠的，不用在這裡指定。
 - 它從**當前後台頁**讀資料、翻頁、對帳、寫 `report_dir/reconcile.md`。
 
 ### 4. 回報
-- 帶出 reconciler 的結果：matched（含**每筆注單單號 `bet_id`** 已釘回 games.jsonl）/ missing_in_bo / extra_in_bo 數、金額是否平、「遊戲內 delta == 後台輸贏」是否逐筆吻合、資料品質警告（後台是否可能沒抓全/疑延遲未回報）。
+- 帶出 reconciler 的結果：matched（含每筆**後台注單單號已釘回 games.jsonl 的 `betid` 欄**）/ missing_in_bo / extra_in_bo 數、金額是否平、「遊戲內 delta == 後台輸贏」是否逐筆吻合、資料品質警告（後台是否可能沒抓全/疑延遲未回報）。
 - 🔴 **特別點出 missing_in_bo**：games.jsonl 標 PASS 卻在後台找不到的款，是最該人工查的（假 PASS 或後台未涵蓋）；但要區分「真缺」與「後台延遲未回報」（後者 poll 後仍無才算缺）。
 
 ### post mode 驗收（Test 3）
-5 款跑完 → 使用者手動開後台篩好 → `/test-game-brand post brandh` → `reconcile.md` 對上 5/5（或誠實標出差異與原因）。
+歷史驗收基準見 `docs/acceptance-fixtures.md`。通則：`reconcile.md` 全數對上、或誠實標出差異與原因。
 
 ---
 
@@ -142,10 +140,10 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - 🔴 **下注前先確認下注成立**：下注鈕點了≠成立（crash 要在倒數窗口、keno 要先選號）。確認鈕狀態變/有「已下注」提示/餘額已扣，才讀 delta；否則重點，連續失敗記 `BET_NOT_PLACED`，不可標 PASS。
 - 🔴 **投注額 > 20 一律先請示使用者**：預設用低籌碼（如 3）跑。要調高 BET 前先算單注金額，>20 就停下問使用者（crash「兩注面板」同回合兩注合計也要算）。**絕不點「全押/all-in」**（會押整個餘額）。
 - 🔴 **遊戲品牌錢包要先有錢**：第三方品牌常有獨立遊戲錢包，需先轉帳；餘額 0 就停下請使用者儲值（見 run 前提）。
-- 🔴 **注單單號（bet_id）是對帳的唯一可靠鍵**：前台常看不到注單單號，對帳時由 `backoffice-reconciler` 從後台擷取每筆 `bet_id` 釘回 games.jsonl（`bo_betid`/`bo_winlose`），並交叉驗證「遊戲內 delta == 後台輸贏」。
-- 🔴 **卡住換新分頁**：60s 無回應 → 新 tab 從 `lobby_url` 重啟，標 `STUCK_RECOVERED`，不在原頁 debug。
-- 🔴 **滿版、不 resize**：座標一律靠「瀏覽器滿版」維持一致。**所有 mode、所有 subagent 都不准呼叫 `browser_resize` 或任何改視窗大小的工具**（程式 resize 會有顯示問題）。viewport 一律「讀+比對」，不一致 fail-fast。跑前提醒使用者把視窗滿版且過程中別動。
-- 🔴 **測試產物一律歸位 `report_dir/`，不落 repo 根**：截圖 `browser_take_screenshot` 的 `filename` 一律給**完整路徑** `report_dir/screenshots/<名稱>.png`；對帳頁截圖給 `report_dir/backoffice/`；校準圖給 `calib_dir/`。**裸檔名會被寫進 repo 根、散落一地**（見 CLAUDE.md 操作慣例）。編排層 spawn subagent 時務必傳入 `report_dir` **絕對路徑**，並要求「所有截圖/中繼檔用該路徑為前綴」。
+- 🔴 **注單單號（betid）是對帳的唯一可靠鍵**：前台常看不到注單單號，對帳時由 `backoffice-reconciler` 從後台擷取每筆注單號釘回 games.jsonl（`betid`/`bo_winlose`），並交叉驗證「遊戲內 delta == 後台輸贏」。
+- 🔴 **卡住換新分頁**（CLAUDE.md 鐵則）：60s 無回應 → 新 tab 從 `lobby_url` 重啟，標 `STUCK_RECOVERED`，不在原頁 debug。
+- 🔴 **滿版、不 resize**（CLAUDE.md 鐵則；`browser_resize` 已被 PreToolUse hook 硬擋）：viewport 一律「讀+比對」，不一致 fail-fast。跑前提醒使用者把視窗滿版且過程中別動。
+- 🔴 **測試產物一律歸位 `report_dir/`**（CLAUDE.md 鐵則；裸檔名截圖已被 hook 硬擋）：截圖 `filename` 給完整路徑（一般 `report_dir/screenshots/`、對帳頁 `report_dir/backoffice/`、校準圖 `calib_dir/`）。編排層 spawn subagent 時務必傳入 `report_dir` **絕對路徑**，並要求「所有截圖/中繼檔用該路徑為前綴」。
 
 ## 邊界
 本 Skill **不**負責導航、登入、開後台、選篩選條件 —— 那是使用者跑前的責任。頁面對不上就 fail-fast 提示，不要替使用者操作站點。**post mode 尤其要先提醒使用者手動開好後台 bet-report 並篩好條件。**

@@ -3,11 +3,10 @@
 # 用法：python3 gen_detail_only.py <report_dir> [--out path.html] [--title 標題]
 import argparse, html, json, os, sys
 
+from report_common import load_games, num
+
 def esc(x):
     return html.escape("" if x is None else str(x))
-
-def num(x):
-    return isinstance(x, (int, float))
 
 def money(x):
     return f"{x:,.2f}" if num(x) else esc(x or "")
@@ -16,32 +15,24 @@ def signed(x):
     return (f"+{x:,.2f}" if x > 0 else f"{x:,.2f}") if num(x) else ""
 
 def betid(g):
-    b = g.get("bo_betid")
+    b = g.get("betid")
     if b in (None, ""): return ""
     if isinstance(b, (list, tuple)):
         return "<br>".join(esc(x) for x in b if x not in (None, ""))
     return esc(b)
 
-def load(path):
-    rows = []
-    with open(path, encoding="utf-8") as f:
-        for ln in f:
-            ln = ln.strip()
-            if ln:
-                rows.append(json.loads(ln))
-    return rows
-
 ap = argparse.ArgumentParser()
 ap.add_argument("report_dir")
 ap.add_argument("--out", default=None)
 ap.add_argument("--title", default="逐款明細")
-ap.add_argument("--names", default=None, help="代碼→前台遊戲名 JSON（鍵為 img 代碼）")
+ap.add_argument("--names", default=None, help="代碼→前台遊戲名 JSON（鍵為 code 代碼；舊 jsonl 的 img 欄自動視為 code）")
 ap.add_argument("--subtitle", default=None,
                 help="標題旁副標（如「品牌（帳號）」）。不給則讀 report_dir/run-meta.json 的 display_name/account；都沒有就不顯示。")
 a = ap.parse_args()
 
 rd = a.report_dir.rstrip("/")
-games = sorted(load(os.path.join(rd, "games.jsonl")), key=lambda g: g.get("idx", 0))
+# load_games：壞行容錯 + 欄位別名正規化（兩套 jsonl schema 都吃得下）
+games = sorted(load_games(os.path.join(rd, "games.jsonl")), key=lambda g: g.get("idx", 0))
 out = a.out or os.path.join(rd, "detail-only.html")
 
 # 站點/品牌/帳號一律「從資料帶入」，腳本本身不寫死任何具體值（站點無預設、帳號無預設）。
@@ -66,9 +57,9 @@ if a.names and os.path.exists(a.names):
         fe_names = {str(k): v for k, v in json.load(f).items() if not str(k).startswith("_")}
 
 def disp_name(g):
-    code = str(g.get("img") or "")
+    code = str(g.get("code") or "")
     fe = fe_names.get(code)
-    orig = g.get("game") or g.get("name") or ""
+    orig = g.get("name") or ""
     if fe:
         sub = f'<span class="orig">原記錄：{esc(orig)}</span>' if orig else ""
         return f'{esc(fe)}{sub}'
@@ -76,7 +67,7 @@ def disp_name(g):
 
 rows = []
 for g in games:
-    st = g.get("verdict") or g.get("status") or "?"
+    st = g.get("status") or "?"
     st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL") else "skip")
     d = g.get("delta")
     d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
@@ -85,20 +76,20 @@ for g in games:
     rows.append(
         "<tr>"
         f'<td class="n">{esc(g.get("idx"))}</td>'
-        f'<td class="n">{esc(g.get("img") or "")}</td>'
+        f'<td class="n">{esc(g.get("code") or "")}</td>'
         f'<td class="game">{disp_name(g)}</td>'
         f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
-        f'<td class="n">{money(g.get("bal_before"))}</td>'
-        f'<td class="n">{money(g.get("bal_after"))}</td>'
+        f'<td class="n">{money(g.get("before_bal"))}</td>'
+        f'<td class="n">{money(g.get("after_bal"))}</td>'
         f'<td class="n {d_cls}">{signed(d)}</td>'
         f'<td class="n {wl_cls}">{signed(wl) if num(wl) else ""}</td>'
-        f'<td class="t">{esc(g.get("bet_time") or "")}</td>'
+        f'<td class="t">{esc(g.get("spin_time") or "")}</td>'
         f'<td class="bid">{betid(g)}</td>'
         f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
         f'<td class="note">{esc(g.get("note") or "")}</td>'
         "</tr>")
 
-n_pass = sum(1 for g in games if (g.get("verdict") or g.get("status")) == "PASS")
+n_pass = sum(1 for g in games if g.get("status") == "PASS")
 n_bet = sum(g["bet"] for g in games if num(g.get("bet")))
 n_wl = sum(g["bo_winlose"] for g in games if num(g.get("bo_winlose")))
 

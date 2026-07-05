@@ -11,12 +11,11 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `lobby_url`：run 起始時記下的大廳 URL（卡住時用來開新分頁回大廳）。
 - `games`：你這批要跑的清單，每項含 `idx`(全域序號)、`name`、`nth`。
 - `report_dir`：報告資料夾絕對路徑；截圖寫 `report_dir/screenshots/`，結果 append `report_dir/games.jsonl`。
-  - 🔴 **截圖路徑規則**：本文後面寫的 `screenshots/g{idx}-*.png` 都是簡寫，實際呼叫 `browser_take_screenshot` 時 `filename` **一律給完整路徑** `<report_dir>/screenshots/g{idx}-*.png`。**給裸檔名會被寫進 MCP 的 cwd（＝repo 根）、到處散落**。所有中繼檔（截圖/暫存）同理，不落 repo 根。
-- `flags`：可能含 `retry_oops`、`dry_run`。
+  - 🔴 **截圖路徑規則**（CLAUDE.md 鐵則；裸檔名已被 PreToolUse hook 硬擋）：本文後面的 `screenshots/g{idx}-*.png` 都是簡寫，實際 `filename` 一律給完整路徑 `<report_dir>/screenshots/g{idx}-*.png`；所有中繼檔同理，不落 repo 根。
+- `flags`：可能含 `dry_run`。（OOPS 重試不走 flag，由 `brand_params.oops.retry_after_dismiss` 控制。）
 
 ## 起手（整批只做一次）
-1. **🔴 讀+驗 viewport（不要 resize！）**：用 `browser_evaluate` 讀 `window.innerWidth/innerHeight`，跟 `brand_params.spin.viewport` 比對。
-   - **絕對不可呼叫 `browser_resize` 或任何改視窗大小的工具**（會造成顯示問題；本專案一律靠「視窗滿版」維持一致，不靠程式 resize）。
+1. **🔴 讀+驗 viewport（不 resize；CLAUDE.md 鐵則，`browser_resize` 已被 PreToolUse hook 硬擋）**：用 `browser_evaluate` 讀 `window.innerWidth/innerHeight`，跟 `brand_params.spin.viewport` 比對。
    - 不一致（差幾 px 內可容忍，明顯不同則否）→ **停下 fail-fast**，回報「當前 viewport 與校準時不同（現在 WxH / 校準 WxH），請把瀏覽器維持滿版、或重新 calibrate」。座標是 viewport 相關的，viewport 不對就會點歪，寧可停也不要硬跑出假結果。
 2. 確認當前頁 URL ≈ `lobby_url`（同 host/path 前綴）。差太多就停下回報「不在大廳，請使用者確認頁面」，不要硬跑。
 
@@ -42,6 +41,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
    - **新分頁**：用 `browser_tabs` 偵測有沒有新分頁開出；有就 `select` 切過去操作。
    - 兩者皆未出現 → 等 `launch.click_timeout_ms` 再判一次；仍無 → status=`LOAD_FAIL`。
    把判到的模式記進該款 note（供回報，不固化成站點預設）。
+   **順手抓 `code`（對帳可靠 join 鍵）**：啟動 URL 的 `game=`/`gid=` 參數值、或大廳卡片圖檔路徑裡的代碼（如 `.../<code>/<code>.png`），抓得到就記進該款 `code` 欄；抓不到留 null（不要瞎猜）。
 2. **載入**：`browser_wait_for` / 等到 `load_timeout_ms`；再靜置 `post_load_settle_ms`。
 3. **過介紹**：點 `intro.click_xy` 共 `intro.clicks` 次，每次間隔 `intro.interval_ms`。（`intro.clicks==0` 跳過。）
 4. **截圖 loaded**：`browser_take_screenshot` → `screenshots/g{idx}-loaded.png`。
@@ -65,7 +65,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 4. 兩段都拿不到合法數字 → 回 null（呼叫端標 `BAL_UNREADABLE`）。
 
 ## 🔴🔴 CRITICAL RULE（這是整個專案存在的理由）
-**沒有「確認過的餘額變化」就絕對不准標 PASS。** 只 click SPIN、沒驗 BEFORE/AFTER delta 就回報成功，正是先前 247 款裡 65 款假 PASS 的根因（真落單率只有 72.5%）。`delta==0`、讀不到餘額、不確定 —— 一律不是 PASS。寧可標 `SPIN_NO_DELTA`/`BAL_UNREADABLE` 讓人來看，也不要給假綠燈。
+**沒有「確認過的餘額變化」就絕對不准標 PASS。** 只 click SPIN、沒驗 BEFORE/AFTER delta 就回報成功，正是先前 品牌H 247 款**初跑**時 65 款假 PASS 的根因（真落單率只有 72.5%；導入驗餘額鐵則後重驗才全數通過）。`delta==0`、讀不到餘額、不確定 —— 一律不是 PASS。寧可標 `SPIN_NO_DELTA`/`BAL_UNREADABLE` 讓人來看，也不要給假綠燈。
 
 ## Stuck rule（卡住換新分頁，不在原頁 debug）
 任一步驟卡死、或非載入期間 60s 無回應：用 `browser_tabs` 開**新分頁** → `browser_navigate` 到 `lobby_url` → 該款標 `STUCK_RECOVERED` → 在新分頁繼續下一款。不要在壞掉的分頁裡反覆重試浪費時間。
@@ -73,11 +73,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 ## dry_run
 `flags.dry_run` 為真：只做步驟 1（進入）+ 截 loaded 圖，**不 SPIN、不動餘額**，status 標 `DRY_RUN`，delta 留 null。用來驗清單抓取與座標對不對，不花籌碼。
 
-## games.jsonl 每行格式
+## games.jsonl 每行格式（canonical schema —— 全 repo 唯一真源，報告/對帳工具都吃這套）
 ```json
-{"idx":1,"id":"g001","name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"win":0.00,"before_read_time":"2026-06-18 03:28:40","spin_time":"2026-06-18 03:28:45","after_read_time":"2026-06-18 03:28:55","oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-bal-before.png","g001-spin.png","g001-bal-after.png"],"note":""}
+{"idx":1,"id":"g001","code":"70001","name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"win":0.00,"betid":null,"before_read_time":"2026-06-18 03:28:40","spin_time":"2026-06-18 03:28:45","after_read_time":"2026-06-18 03:28:55","oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-bal-before.png","g001-spin.png","g001-bal-after.png"],"note":""}
 ```
+- `code`：對帳可靠 join 鍵（見「進入」步驟），抓不到留 null。
 - `win`：本轉中獎金額（LAST WIN，無中獎=0）；應滿足 `delta ≈ win - bet`。
+- `betid`：**後台格式**的注單單號，通常由 post 對帳（`backoffice-reconciler`）釘回，run 時留 null 即可；「玩完即對帳」流程當場拿到後台注單號也可直接記。⚠️ 遊戲內的「票面ID」與後台注單號**不是同一個**，別把票面 ID 填進來（會壞對帳），要記就放 `note`。
 - `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。
 - `screenshots`：固定 4 張 `loaded` / `bal-before` / `spin` / `bal-after`。
 

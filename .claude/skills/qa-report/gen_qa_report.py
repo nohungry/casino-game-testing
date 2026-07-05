@@ -11,50 +11,19 @@ gen_qa_report.py — QA Manager HTML 報告產生器（確定性、site-agnostic
 敘述文字（裁決 / 建議 / 案例）由 --input 的 narrative JSON 提供；缺則用資料驅動的預設。
 輸出單檔 HTML（CSS inline，可離線開），供 QA Manager 檢視與人工逐筆核對。
 """
-import argparse, html, json, os, re, sys
+import argparse, json, os, re, sys
 from collections import Counter
 
-MINUS = "−"  # − 視覺用負號（同範例）
+from report_common import MINUS, betid_str, esc, load_games, money, num, signed
 
 
 # ---------- 工具 ----------
-def load_jsonl(path):
-    rows = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
 def load_json(path, default=None):
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return default
-
-
-def num(x):
-    return isinstance(x, (int, float))
-
-
-def money(x):
-    if not num(x):
-        return ""
-    return f"{x:,.2f}"
-
-
-def signed(x):
-    if not num(x):
-        return ""
-    s = f"{abs(x):,.2f}"
-    return f"+{s}" if x >= 0 else f"{MINUS}{s}"
-
-
-def esc(s):
-    return html.escape(str(s if s is not None else ""))
 
 
 def parse_dt(s):
@@ -89,6 +58,8 @@ def fmt_dur(sec):
 
 
 def code_of(g, glist_by_idx):
+    if g.get("code") not in (None, ""):
+        return str(g["code"])
     e = glist_by_idx.get(g.get("idx"))
     if e and e.get("code"):
         return str(e["code"])
@@ -151,30 +122,16 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--template", default=None)
     ap.add_argument("--reviewer", default=None)
+    ap.add_argument("--variant", choices=("full", "simple"), default="full",
+                    help="full＝官方完整版（裁決/指標/餘額鏈/明細/建議）；simple＝精簡核對版（摘要卡+結論+含注單號明細表）")
     a = ap.parse_args()
 
     rd = a.report_dir.rstrip("/")
     games_path = os.path.join(rd, "games.jsonl")
     if not os.path.exists(games_path):
         sys.exit(f"ERROR: 找不到 {games_path}（請先跑 run）")
-    games = sorted(load_jsonl(games_path), key=lambda g: g.get("idx", 0))
-    # 欄位正規化：容忍 run 端 schema 差異，缺正規欄時用別名補（不覆蓋既有值）。
-    _ALIAS = {
-        "status": ("verdict",),
-        "before_bal": ("bal_before",),
-        "after_bal": ("bal_after",),
-        "name": ("game",),
-        "win": ("win_gross",),
-        "spin_time": ("bet_time",),
-        "betid": ("bo_betid", "bo_betids"),
-    }
-    for g in games:
-        for canon, aliases in _ALIAS.items():
-            if g.get(canon) in (None, ""):
-                for al in aliases:
-                    if g.get(al) not in (None, ""):
-                        g[canon] = g[al]
-                        break
+    # 載入 + 欄位正規化（report_common：壞行容錯、別名補 canonical 欄）
+    games = sorted(load_games(games_path), key=lambda g: g.get("idx", 0))
     meta = load_json(os.path.join(rd, "run-meta.json"), {}) or {}
     glist_raw = load_json(os.path.join(rd, "full-game-list.json"), {}) or {}
     glist = (glist_raw.get("games") if isinstance(glist_raw, dict) else glist_raw) or []
@@ -239,6 +196,101 @@ def main():
         time_range = f"{spins[0][11:16]} – {spins[-1][11:16]}"
 
     title = nar.get("title") or f"{brand_disp} 功能測試報告 — QA Manager Review"
+
+    # ---- 精簡核對版（--variant simple）：摘要卡 + 核對結論 + 含注單號明細表 ----
+    if a.variant == "simple":
+        stitle = nar.get("title_simple") or f"{brand_disp} 功能測試 — 精簡核對版"
+        sok = abnormal == 0 and total > 0
+        n_betid = sum(1 for g in games if betid_str(g))
+        wls = [g["bo_winlose"] for g in games if num(g.get("bo_winlose"))]
+        wl_total = round(sum(wls), 2) if wls else None
+        concl = (nar.get("verdict", {}).get("paragraphs") or [
+            f"共 <b>{total} 款</b>，<b>{npass} 款 PASS</b>、異常 {abnormal} 款；"
+            f"每款以遊戲內餘額 before/after 變動驗證真實下注"
+            + (f"，其中 {n_betid} 款已記後台注單號可逐筆對單" if n_betid else "") + "。"])[0]
+        srows = []
+        for g in games:
+            st = g.get("status", "?")
+            st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
+            d = g.get("delta")
+            d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
+            wl = g.get("bo_winlose")
+            wl_cls = "pos" if (num(wl) and wl > 0) else ("neg" if (num(wl) and wl < 0) else "")
+            srows.append(
+                "<tr>"
+                f'<td class="n">{esc(g.get("idx"))}</td>'
+                f'<td class="n">{esc(code_of(g, glist_by_idx))}</td>'
+                f'<td class="game">{esc(g.get("name"))}</td>'
+                f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
+                f'<td class="n">{money(g.get("before_bal"))}</td>'
+                f'<td class="n">{money(g.get("after_bal"))}</td>'
+                f'<td class="n {d_cls}">{signed(d)}</td>'
+                f'<td class="n {wl_cls}">{signed(wl) if num(wl) else ""}</td>'
+                f'<td class="t">{esc(g.get("spin_time") or "")}</td>'
+                f'<td class="bid">{esc(betid_str(g))}</td>'
+                f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
+                f'<td class="note">{esc(g.get("note") or "")}</td>'
+                "</tr>")
+        sub_bits = " · ".join(esc(b) for b in (host, account, date_s, time_range, reviewer) if b)
+        kpis = [
+            ("總款數", str(total), ""),
+            ("PASS", f"{npass}/{total}", "pos" if sok else ""),
+            ("異常", str(abnormal), "neg" if abnormal else "pos"),
+            ("投注合計", money(total_bet), ""),
+            ("淨輸贏 delta", signed(net) if num(net) else "—",
+             "neg" if (num(net) and net < 0) else "pos"),
+            ("已記注單號", f"{n_betid} 款", ""),
+        ]
+        if wl_total is not None:
+            kpis.append(("後台輸贏合計", signed(wl_total), "neg" if wl_total < 0 else "pos"))
+        kpi_html = "".join(f'<span>{esc(k)} <b class="{c}">{v}</b></span>' for k, v, c in kpis)
+        css = (
+            ":root{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--head:#1f2d3a}"
+            "*{box-sizing:border-box}"
+            'body{margin:0;padding:18px 20px;font:14px/1.5 -apple-system,"Segoe UI","Noto Sans CJK TC",sans-serif;color:#1f2d3a;background:#f4f6f8}'
+            "h1{font-size:18px;margin:0 0 4px}"
+            ".sub{color:var(--mut);font-size:13px;margin-bottom:10px}"
+            ".kpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}.kpi b{font-size:15px}"
+            ".concl{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--pos);"
+            "padding:10px 14px;margin-bottom:14px;font-size:13.5px}"
+            "table{width:100%;border-collapse:collapse;background:#fff;table-layout:auto}"
+            "thead th{position:sticky;top:0;background:var(--head);color:#fff;padding:8px 9px;"
+            "text-align:left;font-weight:600;white-space:nowrap;z-index:2}"
+            "td{padding:7px 9px;border-bottom:1px solid var(--bd);vertical-align:top}"
+            "tbody tr:nth-child(even){background:#f7f9fb}"
+            ".n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}"
+            ".t{white-space:nowrap;color:#333}.game{font-weight:600;min-width:150px}"
+            ".bid{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#475}"
+            ".note{color:var(--mut);font-size:12px;min-width:160px}"
+            ".pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}"
+            ".st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}"
+            ".st.pass{background:#e2f5ec;color:var(--pos)}.st.fail{background:#fbe5e2;color:var(--neg)}"
+            ".st.skip{background:#eef0f2;color:var(--mut)}"
+            "footer{margin-top:12px;color:var(--mut);font-size:12px}")
+        doc = (
+            '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f"<title>{esc(stitle)}</title><style>{css}</style></head><body>"
+            f"<h1>{esc(stitle)}</h1>"
+            f'<div class="sub">{sub_bits}</div>'
+            f'<div class="kpi">{kpi_html}</div>'
+            f'<div class="concl">{concl}</div>'
+            "<table><thead><tr>"
+            '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th><th class="n">投注</th>'
+            '<th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th>'
+            '<th class="n">後台輸贏</th><th>SPIN 時間</th><th>注單號</th><th>狀態</th><th>備註</th>'
+            "</tr></thead><tbody>" + "".join(srows) + "</tbody></table>"
+            f"<footer>report_dir：{esc(rd)}/ · 來源 games.jsonl {total} 行 · 注單號＝後台「注單」欄，多注單以逗號分隔</footer>"
+            "</body></html>")
+        out_path = a.out or os.path.join(rd, "qa-report-simple.html")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(doc)
+        print(json.dumps({
+            "out": out_path, "variant": "simple", "total": total, "pass": npass,
+            "abnormal": abnormal, "net_delta": net, "total_bet": total_bet,
+            "betid_rows": n_betid, "bo_winlose_total": wl_total,
+        }, ensure_ascii=False))
+        return
 
     # ---- 區塊：meta-grid ----
     meta_pairs = [
@@ -400,14 +452,6 @@ def main():
         f'<div class="panel"><h3>加轉／重試確認 <span class="tag">SOP 落實 · 無假 PASS</span></h3><ul>{mc_html}</ul></div>')
 
     # ---- 區塊：逐款明細表 ----
-    def fmt_betid(g):
-        b = g.get("betid")
-        if b in (None, ""):
-            return ""
-        if isinstance(b, (list, tuple)):
-            return ", ".join(str(x) for x in b if x not in (None, ""))
-        return str(b)
-
     drows = []
     for g in games:
         st = g.get("status", "?")
@@ -424,7 +468,7 @@ def main():
             f'<td class="num {d_cls}">{signed(d) if num(d) else ""}</td>'
             f'<td class="num">{money(g.get("win")) if num(g.get("win")) else ""}</td>'
             f'<td class="num">{esc(g.get("spin_time") or "")}</td>'
-            f'<td class="betid">{esc(fmt_betid(g))}</td>'
+            f'<td class="betid">{esc(betid_str(g))}</td>'
             f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
             "</tr>")
     detail_inner = (
