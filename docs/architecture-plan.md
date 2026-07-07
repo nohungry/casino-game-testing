@@ -2,7 +2,7 @@
 
 ## Context
 
-先前在 `~/project/old-project/drc-brandh-test/` 完成了 品牌H 全 247 款測試（覆蓋率 99.6%）。流程已驗證可行，但測試邏輯散在臨時對話與 ad-hoc 操作中，**新品牌要重新一輪手做**。
+先前已在舊專案（外部、不入本 repo）完成某品牌全 247 款測試（覆蓋率 99.6%）。流程已驗證可行，但測試邏輯散在臨時對話與 ad-hoc 操作中，**新品牌要重新一輪手做**。
 
 本專案目標：把流程抽象成可重用的 Skill + Subagent，但**保持「品牌無預設、站點無預設」**：
 - **brand 參數**（SPIN 座標等）：由 AI 在 calibrate 模式產生，寫到本機 `brands/<brand>.yaml`（gitignored）
@@ -135,9 +135,9 @@ flowchart TD
 
 | Mode | 指令 | 使用者前置動作 | Skill 動作 |
 |------|------|---------------|-----------|
-| `calibrate` | `calibrate brandh` | 停在該品牌遊戲大廳 | AI 自挑大廳第一款進入當 sample → 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/brandh.yaml` |
-| `run` | `run brandh` | 停在該 brand 的遊戲列表頁 | 讀當前頁 URL（記為 lobby URL）→ 抓遊戲清單 → 切批 → spawn batch-runner → 彙整報告 |
-| `post` | `post brandh` | 開後台 bet-report、篩好條件 | 讀當前頁資料 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
+| `calibrate` | `calibrate <brand>` | 停在該品牌遊戲大廳 | AI 自挑大廳第一款進入當 sample → 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/<brand>.yaml` |
+| `run` | `run <brand>` | 停在該 brand 的遊戲列表頁 | 讀當前頁 URL（記為 lobby URL）→ 抓遊戲清單 → 切批 → spawn batch-runner → 彙整報告 |
+| `post` | `post <brand>` | 開後台 bet-report、篩好條件 | 讀當前頁資料 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
 
 擴充 flag：`--range a-b`、`--resume-from g042`、`--dry-run`。
 
@@ -194,7 +194,7 @@ locate img[alt=name].nth(n)  → load (load_timeout_ms)
 }
 ```
 
-對比舊 old-project：拿掉 `--cdp-endpoint http://<internal-host>:9225`。MCP 自啟 Chromium 視窗，QA 任何 OS 都可用。
+對比舊專案：拿掉 `--cdp-endpoint http://<internal-host>:9225`。MCP 自啟 Chromium 視窗，QA 任何 OS 都可用。
 
 QA 上手 5 步：
 1. `git clone` 此專案
@@ -206,7 +206,7 @@ QA 上手 5 步：
 ## 建置歷程（摘要）
 
 骨架/MCP/schema/四 subagent/三 mode 於 **2026-06-03** 全數建成；其後多品牌實測驗收全部通過：
-- **calibrate / run / post 皆 live 驗收**：品牌H（2026-06，247 款重驗全過）、品牌B（2026-06-15/16/18 全量 rerun）、品牌G（2026-06-26 全品牌；**2026-07-07 重測 52 款 48 PASS、對帳 48/48 平、詳情 GameName 全掃零配錯**）、品牌R（2026-07-05）。逐案期望值見 `docs/acceptance-fixtures.md`。
+- **calibrate / run / post 皆 live 驗收**：多個第三方品牌（2026-06 Canvas slot 型 247 款重驗全過、slot 型全量 rerun；2026-06-26 異質玩法型全品牌；**2026-07-07 重測 52 款 48 PASS、對帳 48/48 平、詳情 GameName 全掃零配錯**；2026-07-05 再一 slot 型品牌）。逐案期望值見 `docs/acceptance-fixtures.md`。
 - 視窗策略定案「**滿版、不 resize**」（viewport=null + --start-maximized；viewport 只讀+比對），並由 `.claude/settings.json` PreToolUse hook 機器強制（resize / 裸檔名截圖一律 deny）。
 - 2026-07-07 起：使用者只需停在品牌大廳（品牌內選款/切換由 AI 操作）、run 有 canary 先行與收尾重試、對帳含詳情彈窗遊戲名正面確認、run 產物由 `gen_run_artifacts.py` 確定性產出。
 

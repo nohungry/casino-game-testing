@@ -27,7 +27,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
    - 6 次都失敗：**不准用 default 偷渡**（這正是 65 款翻車根因）。把 spin 標 low、寫進 `_calibration_gaps`，附上你截的圖與試過的座標，請使用者人工指認。
 5. **🔴 balance（決定整個專案能不能驗 PASS）**：
    - 先試文字：`browser_evaluate`/`browser_snapshot` 找含金額的元素，推出 `source`(dom/iframe) 與 `text_pattern`(regex)。
-   - 文字讀不到（Canvas/WebGL，如 品牌H）：截餘額區域的圖，**你直接視覺判讀數字**，確認格式 → `source` 仍標記實況、`text_pattern` 給金額格式 regex、note 寫「需靠截圖視覺判讀」。
+   - 文字讀不到（Canvas/WebGL 類遊戲）：截餘額區域的圖，**你直接視覺判讀數字**，確認格式 → `source` 仍標記實況、`text_pattern` 給金額格式 regex、note 寫「需靠截圖視覺判讀」。
    - 記 `retry_reads`（動畫期數字會跳，建議 ≥3）。
    - 完全讀不到合法數字 → 標 low + 寫 gaps（**沒有可靠 balance 讀法，run 就無法驗 PASS**，必須讓使用者知道）。
 6. **bet**：讀/觀察預設投注額與幣別 → `default`/`unit`；找加減鈕推 `step`/`adjust_method`（找不到調整鈕就 `none`）。

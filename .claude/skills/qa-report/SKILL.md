@@ -11,7 +11,7 @@ description: 把一次 run 的測試結果產成「QA Manager 視角」的單檔
 ```
 /qa-report [brand | report_dir] [--reviewer 名] [--simple]
 ```
-- 給 **brand**（如 `品牌B`）：取該品牌最近一次**非 calib** 的 `reports/<brand>-*/`（多個時列出讓使用者選）。
+- 給 **brand**（品牌 slug）：取該品牌最近一次**非 calib** 的 `reports/<brand>-*/`（多個時列出讓使用者選）。
 - 給 **report_dir 路徑**：直接用該資料夾。
 - 都沒給：列出 `reports/` 下可用的 run 讓使用者選，不亂猜。
 - `--reviewer`：報告署名，預設 `QA`。

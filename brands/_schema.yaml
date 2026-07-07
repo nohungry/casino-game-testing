@@ -7,7 +7,7 @@
 #   3. 本檔 + _template.yaml 入 repo（純說明、無站點機密）；
 #      真資料 brands/<brand>.yaml 是 calibrate 產出、gitignore，每個 QA 自己跑。
 #
-# 範例值取自舊專案已驗證的 品牌H 參數（初跑曾 65/247 款假 PASS——只點不驗餘額；
+# 範例值取自舊專案已驗證的某品牌參數（初跑曾 65/247 款假 PASS——只點不驗餘額；
 # 導入「驗餘額才 PASS」後重驗，247 款全數通過），僅供對照；
 # 各品牌實際值由 calibrate 探測產生，不要照抄。
 #
@@ -19,8 +19,8 @@
 
 # --- 識別 -------------------------------------------------------------------
 schema_version: 1                 # int，此 schema 版本，目前固定 1
-brand: brandh                    # str，品牌 slug（小寫無空白），= 檔名 brands/<brand>.yaml
-display_name: "品牌H 電子"      # str，人類可讀名稱，報告用
+brand: samplebrand                    # str，品牌 slug（小寫無空白），= 檔名 brands/<brand>.yaml
+display_name: "範例電子"      # str，人類可讀名稱，報告用
 game_platform_id: "1048"          # str，第三方平台的 gamePlatformId（若該站 URL/清單用得到）
 
 # --- 進入遊戲（從大廳點某一款）---------------------------------------------
@@ -30,7 +30,7 @@ launch:
   click_timeout_ms: 15000         # int，點縮圖的等待上限（毫秒）
 
 # --- 載入 -------------------------------------------------------------------
-load_timeout_ms: 120000           # int，等遊戲載入完成的上限（品牌H 平均 60-90s，最長 ~100s）
+load_timeout_ms: 120000           # int，等遊戲載入完成的上限（實測某品牌平均 60-90s，最長 ~100s）
 post_load_settle_ms: 4000         # int，載入後再靜置多久才動作（讓動畫/資產穩定）
 
 # --- 通過介紹頁（splash / intro / CLICK TO CONTINUE）-----------------------

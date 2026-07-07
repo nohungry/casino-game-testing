@@ -173,4 +173,4 @@ flowchart TD
 
 ## 現況
 
-全 mode（calibrate / run / post + qa-report）已上線，多品牌實測驗收通過（品牌H／品牌B／品牌G／品牌R，歷史期望值見 [`docs/acceptance-fixtures.md`](docs/acceptance-fixtures.md)）；`browser_resize`／裸檔名截圖已由 hooks 硬防線擋下。架構詳見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。
+全 mode（calibrate / run / post + qa-report）已上線，多品牌實測驗收通過（多個第三方品牌，歷史期望值見 [`docs/acceptance-fixtures.md`](docs/acceptance-fixtures.md)）；`browser_resize`／裸檔名截圖已由 hooks 硬防線擋下。架構詳見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。

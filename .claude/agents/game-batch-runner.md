@@ -64,13 +64,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 ## 讀餘額（兩段式，canvas 也要讀得到）
 1. **先試文字**：`balance.source==dom` 用 `browser_evaluate`/`browser_snapshot` 取頁面文字；`==iframe` 試讀該 iframe 文字。用 `balance.text_pattern`（regex，capture group 1 = 金額）抽數字。
-2. **讀不到就截圖用眼睛讀**：很多遊戲（如 品牌H、品牌B）餘額畫在 Canvas/WebGL 上，文字層讀不到。改 `browser_take_screenshot` 餘額所在區域，**你直接從圖片視覺判讀數字**，並驗證它符合 `text_pattern` 的格式（如 `B 950.00`）。
+2. **讀不到就截圖用眼睛讀**：很多品牌的遊戲餘額畫在 Canvas/WebGL 上，文字層讀不到。改 `browser_take_screenshot` 餘額所在區域，**你直接從圖片視覺判讀數字**，並驗證它符合 `text_pattern` 的格式（如 `B 950.00`）。
    - **截圖一律存檔當證據**：讀 BEFORE 存 `screenshots/g{idx}-bal-before.png`、讀 AFTER 存 `screenshots/g{idx}-bal-after.png`（即使用文字讀到，也截一張存證）。這樣每款固定有 4 張圖：`loaded` / `bal-before` / `spin` / `bal-after`，四張都要列進該款的 `screenshots` 欄位。
 3. **不穩定就重讀**：動畫未停時數字會跳；最多重讀 `balance.retry_reads` 次，取穩定值（讀兩次一致才採用）。
 4. 兩段都拿不到合法數字 → 回 null（呼叫端標 `BAL_UNREADABLE`）。
 
 ## 🔴🔴 CRITICAL RULE（這是整個專案存在的理由）
-**沒有「確認過的餘額變化」就絕對不准標 PASS。** 只 click SPIN、沒驗 BEFORE/AFTER delta 就回報成功，正是先前 品牌H 247 款**初跑**時 65 款假 PASS 的根因（真落單率只有 72.5%；導入驗餘額鐵則後重驗才全數通過）。`delta==0`、讀不到餘額、不確定 —— 一律不是 PASS。寧可標 `SPIN_NO_DELTA`/`BAL_UNREADABLE` 讓人來看，也不要給假綠燈。
+**沒有「確認過的餘額變化」就絕對不准標 PASS。** 只 click SPIN、沒驗 BEFORE/AFTER delta 就回報成功，正是先前某品牌 247 款**初跑**時 65 款假 PASS 的根因（真落單率只有 72.5%；導入驗餘額鐵則後重驗才全數通過）。`delta==0`、讀不到餘額、不確定 —— 一律不是 PASS。寧可標 `SPIN_NO_DELTA`/`BAL_UNREADABLE` 讓人來看，也不要給假綠燈。
 
 ## Stuck rule（卡住換新分頁，不在原頁 debug）
 任一步驟卡死、或非載入期間 60s 無回應：用 `browser_tabs` 開**新分頁** → `browser_navigate` 到 `lobby_url` → 該款標 `STUCK_RECOVERED` → 在新分頁繼續下一款。不要在壞掉的分頁裡反覆重試浪費時間。
