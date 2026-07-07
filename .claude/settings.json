@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__playwright__browser_resize|mcp__chrome-devtools__resize_page",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/scripts/claude-hooks/deny-resize.sh\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__playwright__browser_take_screenshot|mcp__chrome-devtools__take_screenshot",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks/check-screenshot-path.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/scripts/claude-hooks/ensure-git-hookspath.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -11,23 +11,13 @@ gen_qa_report.py — QA Manager HTML 報告產生器（確定性、site-agnostic
 敘述文字（裁決 / 建議 / 案例）由 --input 的 narrative JSON 提供；缺則用資料驅動的預設。
 輸出單檔 HTML（CSS inline，可離線開），供 QA Manager 檢視與人工逐筆核對。
 """
-import argparse, html, json, os, re, sys
+import argparse, json, os, re, sys
 from collections import Counter
 
-MINUS = "−"  # − 視覺用負號（同範例）
+from report_common import MINUS, betid_str, esc, load_games, money, num, signed
 
 
 # ---------- 工具 ----------
-def load_jsonl(path):
-    rows = []
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
 def load_json(path, default=None):
     try:
         with open(path, encoding="utf-8") as f:
@@ -36,40 +26,25 @@ def load_json(path, default=None):
         return default
 
 
-def num(x):
-    return isinstance(x, (int, float))
-
-
-def money(x):
-    if not num(x):
-        return ""
-    return f"{x:,.2f}"
-
-
-def signed(x):
-    if not num(x):
-        return ""
-    s = f"{abs(x):,.2f}"
-    return f"+{s}" if x >= 0 else f"{MINUS}{s}"
-
-
-def esc(s):
-    return html.escape(str(s if s is not None else ""))
-
-
 def parse_dt(s):
+    """容錯兩種格式：完整 'YYYY-MM-DD HH:MM:SS' 與純 'HH:MM:SS'（time-only 掛在 1900-01-01）。"""
     import datetime
-    try:
-        return datetime.datetime.strptime(str(s), "%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(str(s).strip(), fmt)
+        except Exception:
+            continue
+    return None
 
 
 def dur_seconds(start, end):
-    """兩個 'YYYY-MM-DD HH:MM:SS' 字串相差秒數；無法解析或負值 → None。"""
+    """兩個時間字串相差秒數；time-only 且 end<start 視為跨午夜（+24h）；無法解析 → None。"""
+    import datetime
     a, b = parse_dt(start), parse_dt(end)
     if a and b:
         d = (b - a).total_seconds()
+        if d < 0 and a.year == 1900 and b.year == 1900:  # time-only 跨午夜
+            d += 86400
         return d if d >= 0 else None
     return None
 
@@ -89,6 +64,8 @@ def fmt_dur(sec):
 
 
 def code_of(g, glist_by_idx):
+    if g.get("code") not in (None, ""):
+        return str(g["code"])
     e = glist_by_idx.get(g.get("idx"))
     if e and e.get("code"):
         return str(e["code"])
@@ -151,13 +128,16 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--template", default=None)
     ap.add_argument("--reviewer", default=None)
+    ap.add_argument("--variant", choices=("full", "simple"), default="full",
+                    help="full＝官方完整版（裁決/指標/餘額鏈/明細/建議）；simple＝精簡核對版（摘要卡+結論+含注單號明細表）")
     a = ap.parse_args()
 
     rd = a.report_dir.rstrip("/")
     games_path = os.path.join(rd, "games.jsonl")
     if not os.path.exists(games_path):
         sys.exit(f"ERROR: 找不到 {games_path}（請先跑 run）")
-    games = sorted(load_jsonl(games_path), key=lambda g: g.get("idx", 0))
+    # 載入 + 欄位正規化（report_common：壞行容錯、別名補 canonical 欄）
+    games = sorted(load_games(games_path), key=lambda g: g.get("idx", 0))
     meta = load_json(os.path.join(rd, "run-meta.json"), {}) or {}
     glist_raw = load_json(os.path.join(rd, "full-game-list.json"), {}) or {}
     glist = (glist_raw.get("games") if isinstance(glist_raw, dict) else glist_raw) or []
@@ -213,15 +193,123 @@ def main():
     viewport = meta.get("viewport")
     vp = f"{viewport[0]}×{viewport[1]}" if isinstance(viewport, list) and len(viewport) == 2 else nar.get("viewport", "")
     date_s = nar.get("date", "")
-    if not date_s and has_time:
+    if not date_s and has_time and re.match(r"^\d{4}-\d{2}-\d{2}", spins[0]):
         date_s = spins[0][:10]
-    if not date_s and meta.get("start_time"):
-        date_s = re.sub(r"^(\d{4})(\d2)(\d2).*", r"\1-\2-\3", str(meta["start_time"]))
+    meta_start = meta.get("started_at") or meta.get("start_time")  # run-meta 實際鍵為 started_at
+    if not date_s and meta_start:
+        m2 = re.match(r"^(\d{4})-?(\d{2})-?(\d{2})", str(meta_start))
+        if m2:
+            date_s = "-".join(m2.groups())
+
+    def _hhmm(ts):
+        """取 HH:MM：完整 datetime 切 [11:16]；純 HH:MM:SS 取前 5 碼。"""
+        ts = str(ts).strip()
+        return ts[11:16] if re.match(r"^\d{4}-\d{2}-\d{2} ", ts) else ts[:5]
+
     time_range = nar.get("time_range", "")
     if not time_range and has_time:
-        time_range = f"{spins[0][11:16]} – {spins[-1][11:16]}"
+        time_range = f"{_hhmm(spins[0])} – {_hhmm(spins[-1])}"
 
     title = nar.get("title") or f"{brand_disp} 功能測試報告 — QA Manager Review"
+
+    # ---- 精簡核對版（--variant simple）：摘要卡 + 核對結論 + 含注單號明細表 ----
+    if a.variant == "simple":
+        stitle = nar.get("title_simple") or f"{brand_disp} 功能測試 — 精簡核對版"
+        sok = abnormal == 0 and total > 0
+        n_betid = sum(1 for g in games if betid_str(g))
+        has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
+        wls = [g["bo_winlose"] for g in games if num(g.get("bo_winlose"))]
+        wl_total = round(sum(wls), 2) if wls else None
+        concl = (nar.get("verdict", {}).get("paragraphs") or [
+            f"共 <b>{total} 款</b>，<b>{npass} 款 PASS</b>、異常 {abnormal} 款；"
+            f"每款以遊戲內餘額 before/after 變動驗證真實下注"
+            + (f"，其中 {n_betid} 款已記後台注單號可逐筆對單" if n_betid else "") + "。"])[0]
+        srows = []
+        for g in games:
+            st = g.get("status", "?")
+            st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
+            d = g.get("delta")
+            d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
+            wl = g.get("bo_winlose")
+            wl_cls = "pos" if (num(wl) and wl > 0) else ("neg" if (num(wl) and wl < 0) else "")
+            srows.append(
+                "<tr>"
+                f'<td class="n">{esc(g.get("idx"))}</td>'
+                f'<td class="n">{esc(code_of(g, glist_by_idx))}</td>'
+                f'<td class="game">{esc(g.get("name"))}</td>'
+                + (f'<td class="game">{esc(g.get("bo_gamename") or MINUS)}</td>' if has_bo_gn else "")
+                + f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
+                f'<td class="n">{money(g.get("before_bal"))}</td>'
+                f'<td class="n">{money(g.get("after_bal"))}</td>'
+                f'<td class="n {d_cls}">{signed(d)}</td>'
+                f'<td class="n {wl_cls}">{signed(wl) if num(wl) else ""}</td>'
+                f'<td class="t">{esc(g.get("spin_time") or "")}</td>'
+                f'<td class="bid">{esc(betid_str(g))}</td>'
+                f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
+                f'<td class="note">{esc(g.get("note") or "")}</td>'
+                "</tr>")
+        sub_bits = " · ".join(esc(b) for b in (host, account, date_s, time_range, reviewer) if b)
+        kpis = [
+            ("總款數", str(total), ""),
+            ("PASS", f"{npass}/{total}", "pos" if sok else ""),
+            ("異常", str(abnormal), "neg" if abnormal else "pos"),
+            ("投注合計", money(total_bet), ""),
+            ("淨輸贏 delta", signed(net) if num(net) else "—",
+             "neg" if (num(net) and net < 0) else "pos"),
+            ("已記注單號", f"{n_betid} 款", ""),
+        ]
+        if wl_total is not None:
+            kpis.append(("後台輸贏合計", signed(wl_total), "neg" if wl_total < 0 else "pos"))
+        kpi_html = "".join(f'<span>{esc(k)} <b class="{c}">{v}</b></span>' for k, v, c in kpis)
+        css = (
+            ":root{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--head:#1f2d3a}"
+            "*{box-sizing:border-box}"
+            'body{margin:0;padding:18px 20px;font:14px/1.5 -apple-system,"Segoe UI","Noto Sans CJK TC",sans-serif;color:#1f2d3a;background:#f4f6f8}'
+            "h1{font-size:18px;margin:0 0 4px}"
+            ".sub{color:var(--mut);font-size:13px;margin-bottom:10px}"
+            ".kpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}.kpi b{font-size:15px}"
+            ".concl{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--pos);"
+            "padding:10px 14px;margin-bottom:14px;font-size:13.5px}"
+            "table{width:100%;border-collapse:collapse;background:#fff;table-layout:auto}"
+            "thead th{position:sticky;top:0;background:var(--head);color:#fff;padding:8px 9px;"
+            "text-align:left;font-weight:600;white-space:nowrap;z-index:2}"
+            "td{padding:7px 9px;border-bottom:1px solid var(--bd);vertical-align:top}"
+            "tbody tr:nth-child(even){background:#f7f9fb}"
+            ".n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}"
+            ".t{white-space:nowrap;color:#333}.game{font-weight:600;min-width:150px}"
+            ".bid{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:#475}"
+            ".note{color:var(--mut);font-size:12px;min-width:160px}"
+            ".pos{color:var(--pos);font-weight:600}.neg{color:var(--neg);font-weight:600}"
+            ".st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}"
+            ".st.pass{background:#e2f5ec;color:var(--pos)}.st.fail{background:#fbe5e2;color:var(--neg)}"
+            ".st.skip{background:#eef0f2;color:var(--mut)}"
+            "footer{margin-top:12px;color:var(--mut);font-size:12px}")
+        doc = (
+            '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            f"<title>{esc(stitle)}</title><style>{css}</style></head><body>"
+            f"<h1>{esc(stitle)}</h1>"
+            f'<div class="sub">{sub_bits}</div>'
+            f'<div class="kpi">{kpi_html}</div>'
+            f'<div class="concl">{concl}</div>'
+            "<table><thead><tr>"
+            '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th>'
+            + ("<th>後台遊戲名</th>" if has_bo_gn else "")
+            + '<th class="n">投注</th>'
+            '<th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th>'
+            '<th class="n">後台輸贏</th><th>SPIN 時間</th><th>注單號</th><th>狀態</th><th>備註</th>'
+            "</tr></thead><tbody>" + "".join(srows) + "</tbody></table>"
+            f"<footer>report_dir：{esc(rd)}/ · 來源 games.jsonl {total} 行 · 注單號＝後台「注單」欄，多注單以逗號分隔</footer>"
+            "</body></html>")
+        out_path = a.out or os.path.join(rd, "qa-report-simple.html")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(doc)
+        print(json.dumps({
+            "out": out_path, "variant": "simple", "total": total, "pass": npass,
+            "abnormal": abnormal, "net_delta": net, "total_bet": total_bet,
+            "betid_rows": n_betid, "bo_winlose_total": wl_total,
+        }, ensure_ascii=False))
+        return
 
     # ---- 區塊：meta-grid ----
     meta_pairs = [
@@ -282,6 +370,8 @@ def main():
     exec_started = min(bts) if bts else (spins[0] if spins else None)
     exec_ended = max(ats) if ats else (spins[-1] if spins else None)
     exec_seconds = dur_seconds(exec_started, exec_ended)
+    if exec_seconds is None:  # fallback：run-meta 的 started_at/ended_at（run mode 收尾會寫）
+        exec_seconds = dur_seconds(meta.get("started_at"), meta.get("ended_at"))
     per_game_seconds = (exec_seconds / total) if (exec_seconds is not None and total) else None
     amort = (calib_seconds / total) if (calib_seconds is not None and total) else None
 
@@ -383,6 +473,7 @@ def main():
         f'<div class="panel"><h3>加轉／重試確認 <span class="tag">SOP 落實 · 無假 PASS</span></h3><ul>{mc_html}</ul></div>')
 
     # ---- 區塊：逐款明細表 ----
+    full_has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
     drows = []
     for g in games:
         st = g.get("status", "?")
@@ -394,20 +485,25 @@ def main():
             f'<td class="num">{esc(g.get("idx"))}</td>'
             f'<td class="num">{esc(code_of(g, glist_by_idx))}</td>'
             f'<td>{esc(g.get("name"))}</td>'
-            f'<td class="num">{money(g.get("before_bal"))}</td>'
+            + (f'<td>{esc(g.get("bo_gamename") or MINUS)}</td>' if full_has_bo_gn else "")
+            + f'<td class="num">{money(g.get("before_bal"))}</td>'
             f'<td class="num">{money(g.get("after_bal"))}</td>'
             f'<td class="num {d_cls}">{signed(d) if num(d) else ""}</td>'
             f'<td class="num">{money(g.get("win")) if num(g.get("win")) else ""}</td>'
             f'<td class="num">{esc(g.get("spin_time") or "")}</td>'
+            f'<td class="betid">{esc(betid_str(g))}</td>'
             f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
             "</tr>")
     detail_inner = (
-        '<div class="detail-tools">逐款下注前後餘額與 SPIN 時間，順序同遊戲序列表（idx）；'
-        '可對照大廳逐筆核對。共 ' + str(total) + ' 款。</div>'
+        '<style>.detail-scroll td.betid{font-family:ui-monospace,Menlo,Consolas,monospace;'
+        'font-size:11px;color:var(--muted);white-space:nowrap;word-break:keep-all}</style>'
+        '<div class="detail-tools">逐款下注前後餘額、SPIN 時間與後台注單號，順序同遊戲序列表（idx）；'
+        '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。</div>'
         '<div class="detail-scroll"><table><thead><tr>'
         '<th class="num">編號</th><th class="num">代碼</th><th>遊戲名</th>'
-        '<th class="num">進入前</th><th class="num">進入後</th><th class="num">delta</th>'
-        '<th class="num">中獎</th><th class="num">SPIN 時間</th><th>狀態</th>'
+        + ("<th>後台遊戲名</th>" if full_has_bo_gn else "")
+        + '<th class="num">進入前</th><th class="num">進入後</th><th class="num">delta</th>'
+        '<th class="num">中獎</th><th class="num">SPIN 時間</th><th>注單號</th><th>狀態</th>'
         '</tr></thead><tbody>' + "".join(drows) + '</tbody></table></div>')
 
     # ---- 區塊：evidence ----
