@@ -6,8 +6,8 @@
 
 本專案目標：把流程抽象成可重用的 Skill + Subagent，但**保持「品牌無預設、站點無預設」**：
 - **brand 參數**（SPIN 座標等）：由 AI 在 calibrate 模式產生，寫到本機 `brands/<brand>.yaml`（gitignored）
-- **站點與帳號**：使用者自己開瀏覽器、登入、停在該品牌遊戲大廳（另開好後台投注報表分頁），Skill 從當前頁面接手
-- **Skill 不跨站不登入不換品牌**：品牌內選款/進入/退出遊戲由 AI 操作；只做「批次驅動 + 餘額驗證 + 報告產出」
+- **站點與帳號**：使用者自己開瀏覽器、登入、建議停在該品牌遊戲大廳（另開好後台投注報表分頁），Skill 從當前頁面接手
+- **Skill 不跨站不登入**：品牌內選款/進入/退出遊戲、同站內品牌切換由 AI 操作（切換前宣告）；只做「批次驅動 + 餘額驗證 + 報告產出」
 
 QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chromium，不依賴 9225 port 轉發。
 
@@ -19,7 +19,7 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 |------|------|
 | 品牌無預設 | repo 不存任何 brand yaml 種子；calibrate 才產生；產出在 `brands/`（gitignored） |
 | 站點無預設 | repo 無 `sites/`、無 `.env`；每次跑由使用者開瀏覽器準備好狀態 |
-| Skill 不跨站不登入不換品牌 | 使用者停在品牌大廳即可；品牌內選款/進入遊戲由 AI 操作；Skill 不跨站導航、不登入 |
+| Skill 不跨站不登入 | 使用者建議停在品牌大廳；品牌內選款/進入遊戲、同站品牌切換由 AI 操作（先宣告）；不在目標站點/未登入才停下 |
 | 跨平台 | `.mcp.json` 不寫死 CDP URL；MCP 自啟 Chromium |
 | 驗餘額才能 PASS | subagent 強制流程 BEFORE → SPIN → AFTER → delta check；無 delta 不准 PASS |
 | 卡住換新分頁 | 60s 無回應就觸發；新 tab 用 run 開始時記下的 lobby URL |
