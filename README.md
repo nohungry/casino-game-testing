@@ -167,20 +167,10 @@ flowchart TD
 
 ## 鐵則
 
-- 🔴 **驗餘額才能 PASS** — 只 click SPIN 不驗餘額會誤報。`delta == 0` 一律不准標 PASS，要標 `SPIN_NO_DELTA`。先前 247 款裡有 65 款就是這樣假 PASS（實際只 72.5% 真落單）。
-- 🔴 **卡住換新分頁** — 任何不可恢復的卡死、或 60s 無回應，直接開新 tab 從 lobby URL 重啟，不在原分頁 debug，該款標 `STUCK_RECOVERED`。
-- 🔴 **滿版、不 resize** — 座標靠瀏覽器滿版維持一致；工具**一律不呼叫 `browser_resize`**（程式 resize 有顯示問題）。viewport 只「讀+比對」，跟校準時不符就 fail-fast。跑前把視窗滿版、過程別動。
+**單一真源見 [`CLAUDE.md`](CLAUDE.md)「核心不變量」**（驗餘額才能 PASS／滿版不 resize／卡住換新分頁／品牌站點無預設…）。其中「不 resize」與「截圖歸位」已由 `.claude/settings.json` PreToolUse hook 機器強制。
 
 ---
 
-## 實作進度
+## 現況
 
-完整架構與分步計畫見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。
-
-- ✅ Step 1 / 1.5 — 專案骨架 + 架構修正
-- ✅ Step 2 — 跨平台 `.mcp.json` + 權限 + 本 README
-- ✅ Step 3 — `brands/_schema.yaml` + `_template.yaml`
-- ✅ Step 4–5 — `game-batch-runner` subagent + `run` mode（核心，待 live 驗收）
-- ✅ Step 6 — `backoffice-reconciler` + `post` mode（待 live 驗收）
-- ✅ Step 7 — `brand-calibrator` + `calibrate` mode（半互動，待 live 驗收）
-- ⏸ Step 8 — 全量壓測
+全 mode（calibrate / run / post + qa-report）已上線，多品牌實測驗收通過（品牌H／品牌B／品牌G／品牌R，歷史期望值見 [`docs/acceptance-fixtures.md`](docs/acceptance-fixtures.md)）；`browser_resize`／裸檔名截圖已由 hooks 硬防線擋下。架構詳見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。

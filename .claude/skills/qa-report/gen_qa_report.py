@@ -27,18 +27,24 @@ def load_json(path, default=None):
 
 
 def parse_dt(s):
+    """容錯兩種格式：完整 'YYYY-MM-DD HH:MM:SS' 與純 'HH:MM:SS'（time-only 掛在 1900-01-01）。"""
     import datetime
-    try:
-        return datetime.datetime.strptime(str(s), "%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(str(s).strip(), fmt)
+        except Exception:
+            continue
+    return None
 
 
 def dur_seconds(start, end):
-    """兩個 'YYYY-MM-DD HH:MM:SS' 字串相差秒數；無法解析或負值 → None。"""
+    """兩個時間字串相差秒數；time-only 且 end<start 視為跨午夜（+24h）；無法解析 → None。"""
+    import datetime
     a, b = parse_dt(start), parse_dt(end)
     if a and b:
         d = (b - a).total_seconds()
+        if d < 0 and a.year == 1900 and b.year == 1900:  # time-only 跨午夜
+            d += 86400
         return d if d >= 0 else None
     return None
 
@@ -187,13 +193,22 @@ def main():
     viewport = meta.get("viewport")
     vp = f"{viewport[0]}×{viewport[1]}" if isinstance(viewport, list) and len(viewport) == 2 else nar.get("viewport", "")
     date_s = nar.get("date", "")
-    if not date_s and has_time:
+    if not date_s and has_time and re.match(r"^\d{4}-\d{2}-\d{2}", spins[0]):
         date_s = spins[0][:10]
-    if not date_s and meta.get("start_time"):
-        date_s = re.sub(r"^(\d{4})(\d2)(\d2).*", r"\1-\2-\3", str(meta["start_time"]))
+    meta_start = meta.get("started_at") or meta.get("start_time")  # run-meta 實際鍵為 started_at
+    if not date_s and meta_start:
+        m2 = re.match(r"^(\d{4})-?(\d{2})-?(\d{2})", str(meta_start))
+        if m2:
+            date_s = "-".join(m2.groups())
+
+    def _hhmm(ts):
+        """取 HH:MM：完整 datetime 切 [11:16]；純 HH:MM:SS 取前 5 碼。"""
+        ts = str(ts).strip()
+        return ts[11:16] if re.match(r"^\d{4}-\d{2}-\d{2} ", ts) else ts[:5]
+
     time_range = nar.get("time_range", "")
     if not time_range and has_time:
-        time_range = f"{spins[0][11:16]} – {spins[-1][11:16]}"
+        time_range = f"{_hhmm(spins[0])} – {_hhmm(spins[-1])}"
 
     title = nar.get("title") or f"{brand_disp} 功能測試報告 — QA Manager Review"
 
@@ -202,6 +217,7 @@ def main():
         stitle = nar.get("title_simple") or f"{brand_disp} 功能測試 — 精簡核對版"
         sok = abnormal == 0 and total > 0
         n_betid = sum(1 for g in games if betid_str(g))
+        has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
         wls = [g["bo_winlose"] for g in games if num(g.get("bo_winlose"))]
         wl_total = round(sum(wls), 2) if wls else None
         concl = (nar.get("verdict", {}).get("paragraphs") or [
@@ -221,7 +237,8 @@ def main():
                 f'<td class="n">{esc(g.get("idx"))}</td>'
                 f'<td class="n">{esc(code_of(g, glist_by_idx))}</td>'
                 f'<td class="game">{esc(g.get("name"))}</td>'
-                f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
+                + (f'<td class="game">{esc(g.get("bo_gamename") or MINUS)}</td>' if has_bo_gn else "")
+                + f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
                 f'<td class="n">{money(g.get("before_bal"))}</td>'
                 f'<td class="n">{money(g.get("after_bal"))}</td>'
                 f'<td class="n {d_cls}">{signed(d)}</td>'
@@ -276,7 +293,9 @@ def main():
             f'<div class="kpi">{kpi_html}</div>'
             f'<div class="concl">{concl}</div>'
             "<table><thead><tr>"
-            '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th><th class="n">投注</th>'
+            '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th>'
+            + ("<th>後台遊戲名</th>" if has_bo_gn else "")
+            + '<th class="n">投注</th>'
             '<th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th>'
             '<th class="n">後台輸贏</th><th>SPIN 時間</th><th>注單號</th><th>狀態</th><th>備註</th>'
             "</tr></thead><tbody>" + "".join(srows) + "</tbody></table>"
@@ -351,6 +370,8 @@ def main():
     exec_started = min(bts) if bts else (spins[0] if spins else None)
     exec_ended = max(ats) if ats else (spins[-1] if spins else None)
     exec_seconds = dur_seconds(exec_started, exec_ended)
+    if exec_seconds is None:  # fallback：run-meta 的 started_at/ended_at（run mode 收尾會寫）
+        exec_seconds = dur_seconds(meta.get("started_at"), meta.get("ended_at"))
     per_game_seconds = (exec_seconds / total) if (exec_seconds is not None and total) else None
     amort = (calib_seconds / total) if (calib_seconds is not None and total) else None
 
@@ -452,6 +473,7 @@ def main():
         f'<div class="panel"><h3>加轉／重試確認 <span class="tag">SOP 落實 · 無假 PASS</span></h3><ul>{mc_html}</ul></div>')
 
     # ---- 區塊：逐款明細表 ----
+    full_has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
     drows = []
     for g in games:
         st = g.get("status", "?")
@@ -463,7 +485,8 @@ def main():
             f'<td class="num">{esc(g.get("idx"))}</td>'
             f'<td class="num">{esc(code_of(g, glist_by_idx))}</td>'
             f'<td>{esc(g.get("name"))}</td>'
-            f'<td class="num">{money(g.get("before_bal"))}</td>'
+            + (f'<td>{esc(g.get("bo_gamename") or MINUS)}</td>' if full_has_bo_gn else "")
+            + f'<td class="num">{money(g.get("before_bal"))}</td>'
             f'<td class="num">{money(g.get("after_bal"))}</td>'
             f'<td class="num {d_cls}">{signed(d) if num(d) else ""}</td>'
             f'<td class="num">{money(g.get("win")) if num(g.get("win")) else ""}</td>'
@@ -478,7 +501,8 @@ def main():
         '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。</div>'
         '<div class="detail-scroll"><table><thead><tr>'
         '<th class="num">編號</th><th class="num">代碼</th><th>遊戲名</th>'
-        '<th class="num">進入前</th><th class="num">進入後</th><th class="num">delta</th>'
+        + ("<th>後台遊戲名</th>" if full_has_bo_gn else "")
+        + '<th class="num">進入前</th><th class="num">進入後</th><th class="num">delta</th>'
         '<th class="num">中獎</th><th class="num">SPIN 時間</th><th>注單號</th><th>狀態</th>'
         '</tr></thead><tbody>' + "".join(drows) + '</tbody></table></div>')
 

@@ -56,26 +56,19 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 
 ### 6. 切批 + 派發 game-batch-runner
 - 依 `batch.size`（預設 8）把清單切成數批。
-- 對每批，用 **Agent 工具 spawn `game-batch-runner`**（subagent_type: `game-batch-runner`），prompt 帶入：完整 `brand_params`、`lobby_url`、該批 `games`、`report_dir` 絕對路徑、`flags`。
+- 對每批，用 **Agent 工具 spawn `game-batch-runner`**（subagent_type: `game-batch-runner`），prompt 帶入：完整 `brand_params`、`lobby_url`、該批 `games`、`report_dir` 絕對路徑、`flags`、**`expected_start_balance`**（上一批回報的結束餘額；首批＝canary 後餘額）——runner 開批第一款讀到的 before 若明顯偏離（>1 個注額），note 記「疑前批晚結算入帳/錢包同步」供對帳留意，不擋跑。
 - `batch.parallel_batches==1`（預設）：**一批跑完再下一批**（共用同一個瀏覽器分頁，不能並行搶滑鼠/座標）。>1 時才考慮多分頁並行（目前保守，先序列）。
 - 每個 batch-runner 自己 append `games.jsonl`；你收集它的回報。
 
-### 7. 彙整報告（讀 `games.jsonl` 全部行，產三份）
+### 6.5 收尾重試一輪（LOAD_FAIL / STUCK）
+- 全批跑完後，收集 status 為 `LOAD_FAIL` / `STUCK_RECOVERED`（未完成驗證）的款，**重試一次**（款數少編排層自跑、多就再派一小批）。
+- 重試成功 → 該款在 games.jsonl **補一行新紀錄**（note 記「重試後成功」，彙整時以新行為準）；仍失敗 → 維持原狀態，summary 註明「已重試 1 次」。
+- `BET_NOT_PLACED` **不自動重試**（多半是環境未開放下注、重試昂貴），summary 建議人工/開發確認即可。
 
-**(a) `run-summary.md`**：
-- 總款數、各 status 計數、覆蓋率（跑完款數/總數）。
-- **PASS 款的總 delta**（驗收看這個）。
-- 列出所有非 PASS 款（status + note），方便人工跟進。
-- 🔴 明確標示：PASS 數 = 有確認餘額變化的款數，**不是只 click 成功的款數**。
-- **逐款明細表**（Markdown）：欄位 `編號 / 代碼 / 遊戲名 / 進入前 / 進入後 / delta / 注額 / 中獎 / spin 時間 / 注單號 / 狀態`（與 qa-report 明細表同欄位；注單號 run 完通常空白，post 對帳釘回後重產才有值）。
-
-**(b) `report_dir/games.csv`**（Excel 可直接開、可篩選）：
-- 表頭：`idx,code,name,before_bal,after_bal,delta,bet,win,before_read_time,spin_time,after_read_time,betid,status`
-- 每款一列，順序同 `games.jsonl`。中文名含逗號要正確處理（用引號包裹）；建議用 Bash/`python3` 從 `games.jsonl` 轉出，不要手刻。
-
-**(c)** 既有 `run-meta.json` 不動。
-
-> CSV/明細表的 `win` 與三個時間欄直接取自 `games.jsonl`（game-batch-runner 已寫入）；若舊報告沒有這些欄位，留空即可。
+### 7. 彙整報告（腳本產出，不手刻）
+- 🕒 先用 Bash `date '+%Y-%m-%d %H:%M:%S'` 把 **`ended_at`** 寫回 `run-meta.json`（qa-report 執行耗時的 fallback 來源）。
+- 跑 **`uv run .claude/skills/test-game-brand/gen_run_artifacts.py <report_dir>`**（無 uv 退 `python3`）：從 `games.jsonl` 確定性產出 `run-summary.md` + `games.csv`（含注單號/後台遊戲名欄；run 完 betid 空白屬正常，post 釘回後重跑即帶入）。**不要手刻這兩份**——數字要可被人工核對。
+- 腳本輸出的 JSON（各 status 計數、PASS 總 delta）拿來回報使用者；🔴 明確標示 PASS 數 = 有確認餘額變化的款數，**不是只 click 成功的款數**。既有 `run-meta.json` 其他欄不動。
 
 ### run mode 驗收（Test 2）
 歷史驗收基準（含具體品牌/數值）見 `docs/acceptance-fixtures.md`——具體值屬歷史紀錄、非預設，勿當校準參數用。
@@ -140,6 +133,7 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 ### 4. 回報
 - 帶出 reconciler 的結果：matched（含每筆**後台注單單號已釘回 games.jsonl 的 `betid` 欄**）/ missing_in_bo / extra_in_bo 數、金額是否平、「遊戲內 delta == 後台輸贏」是否逐筆吻合、**遊戲名確認覆蓋率**（詳情彈窗掃了幾筆/全部幾筆）、資料品質警告（後台是否可能沒抓全/疑延遲未回報）。
 - 🔴 **特別點出 missing_in_bo**：games.jsonl 標 PASS 卻在後台找不到的款，是最該人工查的（假 PASS 或後台未涵蓋）；但要區分「真缺」與「後台延遲未回報」（後者 poll 後仍無才算缺）。
+- 🔴 **自動重產最終報告**：betid/bo_gamename 釘回後，重跑 `gen_run_artifacts.py`（run-summary/CSV 帶入注單號），並重產 qa-report（report_dir 裡既有哪個版型就重產哪個；預設 full+simple 都產），最後向使用者宣告最終版路徑（沿用 qa-report 完成宣告規則）。
 
 ### post mode 驗收（Test 3）
 歷史驗收基準見 `docs/acceptance-fixtures.md`。通則：`reconcile.md` 全數對上、或誠實標出差異與原因。

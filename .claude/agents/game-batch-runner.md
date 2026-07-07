@@ -13,11 +13,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `report_dir`：報告資料夾絕對路徑；截圖寫 `report_dir/screenshots/`，結果 append `report_dir/games.jsonl`。
   - 🔴 **截圖路徑規則**（CLAUDE.md 鐵則；裸檔名已被 PreToolUse hook 硬擋）：本文後面的 `screenshots/g{idx}-*.png` 都是簡寫，實際 `filename` 一律給完整路徑 `<report_dir>/screenshots/g{idx}-*.png`；所有中繼檔同理，不落 repo 根。
 - `flags`：可能含 `dry_run`。（OOPS 重試不走 flag，由 `brand_params.oops.retry_after_dismiss` 控制。）
+- `expected_start_balance`（選填）：上一批回報的結束餘額，供起手餘額鏈交接比對（見下）。
 
 ## 起手（整批只做一次）
 1. **🔴 讀+驗 viewport（不 resize；CLAUDE.md 鐵則，`browser_resize` 已被 PreToolUse hook 硬擋）**：用 `browser_evaluate` 讀 `window.innerWidth/innerHeight`，跟 `brand_params.spin.viewport` 比對。
    - 不一致（差幾 px 內可容忍，明顯不同則否）→ **停下 fail-fast**，回報「當前 viewport 與校準時不同（現在 WxH / 校準 WxH），請把瀏覽器維持滿版、或重新 calibrate」。座標是 viewport 相關的，viewport 不對就會點歪，寧可停也不要硬跑出假結果。
 2. 確認當前頁 URL ≈ `lobby_url`（同 host/path 前綴）。差太多就停下回報「不在大廳，請使用者確認頁面」，不要硬跑。
+3. **餘額鏈交接**：若編排層有給 `expected_start_balance`（上一批結束餘額），本批**第一款**讀到的 BEFORE_BAL 與其差異明顯（>1 個注額）→ 該款 note 記「before 與前批結束餘額差 X，疑前批晚結算入帳/錢包同步」，供對帳留意；**不擋跑**。
 
 ## 點擊方式（DOM vs canvas）
 - **大廳/站台 DOM 元素**（遊戲卡、回大廳鈕、確認彈窗…）：用 `browser_click`（element ref / selector）。卡片若 hover 才出「選擇」鈕、或普通 click 被覆蓋層攔截，改用 `browser_evaluate` 對卡片元素 `.click()`（事件冒泡啟動）。

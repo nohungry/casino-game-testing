@@ -203,78 +203,20 @@ QA 上手 5 步：
 4. 在 Claude Code 輸入 `/test-game-brand calibrate <brand>`（第一次跑該 brand；AI 自挑大廳第一款當 sample）或 `run <brand>`
 5. 跑完，後台 bet-report 篩好 → `/test-game-brand post <brand>` 對帳（含詳情彈窗遊戲名正面確認）
 
-## 實作順序（一步一步，每步使用者驗收後才進下一步）
+## 建置歷程（摘要）
 
-### ✅ Step 1（已完成 2026-06-03）
-建立專案骨架、複製 plan 到 `docs/`、新建 memory。
+骨架/MCP/schema/四 subagent/三 mode 於 **2026-06-03** 全數建成；其後多品牌實測驗收全部通過：
+- **calibrate / run / post 皆 live 驗收**：品牌H（2026-06，247 款重驗全過）、品牌B（2026-06-15/16/18 全量 rerun）、品牌G（2026-06-26 全品牌；**2026-07-07 重測 52 款 48 PASS、對帳 48/48 平、詳情 GameName 全掃零配錯**）、品牌R（2026-07-05）。逐案期望值見 `docs/acceptance-fixtures.md`。
+- 視窗策略定案「**滿版、不 resize**」（viewport=null + --start-maximized；viewport 只讀+比對），並由 `.claude/settings.json` PreToolUse hook 機器強制（resize / 裸檔名截圖一律 deny）。
+- 2026-07-07 起：使用者只需停在品牌大廳（品牌內選款/切換由 AI 操作）、run 有 canary 先行與收尾重試、對帳含詳情彈窗遊戲名正面確認、run 產物由 `gen_run_artifacts.py` 確定性產出。
 
-### ✅ Step 1.5（已完成 2026-06-03）
-架構修正：刪 `sites/`、`seed/`；`brands/` gitignore；移除站點 memory；新增 `.gitignore`。
+## Critical Files（現況）
 
-### ✅ Step 2（已完成 2026-06-03）：跨平台 MCP + 權限設定
-- ✅ MCP 設定（playwright + chrome-devtools，無寫死 CDP/IP；丟掉 figma）
-  - repo 只 track 通用範本 `.mcp.json.example`（不寫死任何路徑）；實際 `.mcp.json` 已 gitignore，本機路徑（含 username）不入 repo（資安：避免曝光家目錄/使用者名稱）。
-  - WSL 需在本機 `.mcp.json` 補 `--executable-path` 指向本機 chromium（啟動失敗的修法，見 [[project-wsl-browser-mcp-setup]]）；macOS/Windows/桌面 Linux 多半範本原樣即可。跨平台調整指南寫在 README。
-- ✅ `.claude/settings.local.json`（只留 browser MCP 工具 + 少量泛用 Bash；去掉所有 WSL/Windows-only、9223-9225、figma；gitignored）
-- ✅ `README.md`（一句話定位 + QA 上手 5 步 + 三 mode 速查 + 兩鐵則 + 進度）
-- ✅ 已驗收：playwright MCP 成功啟動 Chromium、`browser_navigate` 開 example.com 正常回傳
-
-### ✅ Step 3（已完成 2026-06-03）：Brand schema + template
-- ✅ `brands/_schema.yaml`（欄位定義 + 註解 + 品牌H 已驗證範例值；spin.xy=[1283,857] 對上舊報告）
-- ✅ `brands/_template.yaml`（空白填空骨架，含 `_calibration_gaps` 欄位防 default 偷渡）
-- ✅ 兩份皆 yaml.safe_load 驗證通過
-- 驗收：人類能讀懂、AI 能用作 calibrate 產出模板
-
-### ✅ Step 4（已完成 2026-06-03）：`game-batch-runner` subagent（最關鍵）
-- ✅ `.claude/agents/game-batch-runner.md`
-- ✅ 起手驗 viewport；確認在大廳（原設計是 browser_resize 鎖定，後由下方「跨 Step 修正」改為**滿版＋讀比對 fail-fast、禁止 resize**）
-- ✅ per-game 流程：進入→載入→介紹→BEFORE_BAL→SPIN→AFTER_BAL→驗 delta→退出→append jsonl
-- ✅ CRITICAL RULE 焊死（無 delta 不准 PASS）
-- ✅ 讀餘額兩段式 fallback：DOM/iframe 文字 → 讀不到改 take_screenshot 視覺判讀（解 Canvas/WebGL 讀不到問題）
-- ✅ 新增 status `BAL_UNREADABLE`（讀不到 ≠ delta 為 0，病因不同要分開）+ `DRY_RUN`
-- ✅ Stuck rule（60s→新分頁回 lobby_url）、dry_run（OOPS 重試後改由 yaml `oops.retry_after_dismiss` 控制，`--retry-oops` flag 已移除）
-- 驗收（搭 Step 5 live 跑）
-
-### ✅ Step 5（已完成 2026-06-03，待 live 驗收）：SKILL.md `run` mode
-- ✅ `.claude/skills/test-game-brand/SKILL.md`
-- ✅ 三 mode dispatch；run 完整（讀 yaml→fail-fast 檢查 gaps→記 lobby_url→抓清單→切批→spawn batch-runner→彙整 run-summary.md）
-- ✅ calibrate/post 標明 Step 7/6 尚未接線，不假裝能跑
-- ⏳ 待驗收 Test 2：開 品牌H lobby → `run brandh --range 1-5` → games.jsonl 5 行 PASS、總 delta ≈ -250
-  - ⚠️ 需先有 `brands/brandh.yaml`（Step 7 calibrate 產出）；在那之前可手動依 _schema 寫一份來 live 測 run
-
-### ✅ Step 6（已完成 2026-06-03，待 live 驗收）：`backoffice-reconciler` + SKILL.md `post` mode
-- ✅ `.claude/agents/backoffice-reconciler.md`：讀使用者手動開好的後台 bet-report、翻頁抓全、對帳、產 reconcile.md（missing_in_bo / extra_in_bo / 金額核對 / 非 PASS 一覽）
-- ✅ SKILL.md `post` 段：**先提醒使用者手動開好後台篩好條件** → 選 run → spawn reconciler → 回報（醒目 missing_in_bo）
-- ✅ 不導航/不登入/不改篩選/不 resize；抓不全會誠實標示
-- ⏳ 待驗收 Test 3：5 款跑完 → 手動開後台 → `post brandh` → reconcile.md 對上 5/5
-
-### 🔧 跨 Step 修正（2026-06-03）：視窗大小策略改為「滿版、不 resize」
-使用者要求：瀏覽器一律當前螢幕滿版，且**禁止呼叫 playwright resize**（過去 resize 有顯示問題）。連動修改：
-- `playwright-mcp.config.json`（新增，git track）：`contextOptions.viewport=null` + `launchOptions.args=["--start-maximized"]`，啟動即滿版、viewport 跟視窗走不鎖死。`.mcp.json`/`.example` 加 `--config` 引用。
-- `game-batch-runner` / `brand-calibrator`：移除 `browser_resize` 工具；viewport 改「讀+比對」(run 不一致 fail-fast) / 「唯讀記錄」(calibrate)。
-- `_schema.yaml` spin.viewport 語義改為「校準當下實際 viewport，run 比對非 resize」；座標與機器/螢幕綁定（本來就 per-machine）。
-- SKILL.md 新增第三鐵則「滿版、不 resize」；calibrate/run 前提加「視窗已滿版」。
-- ✅ `settings.local.json` 曾殘留的 `browser_resize` / `resize_page` 兩條 allow 已清除（2026-07 確認）；另 `.claude/settings.json` 已加 PreToolUse hook 把 resize 從「自律」升級成「機器擋下」。
-
-### ✅ Step 7（已完成 2026-06-03，待 live 驗收）：`brand-calibrator` + SKILL.md `calibrate` mode
-- ✅ 互動程度敲定：**半互動**（AI 自動探測 + 關鍵欄位截圖給使用者確認後才寫 yaml）
-- ✅ `.claude/agents/brand-calibrator.md`：探單一 sample，spin.xy 用「餘額變化」實測驗證、±50px 八方向最多 6 次、探不到寫 gaps 不偷渡；回傳 draft + 信心度 + needs_confirm + gaps + 截圖
-- ✅ SKILL.md `calibrate` 段：派發 calibrator → 半互動確認(spin.xy/balance 配截圖) → 寫 brands/<brand>.yaml（gaps 非空則標記不可 run）
-- ⏳ 待驗收 Test 1：開 品牌H sample → `calibrate brandh` → 產出 brandh.yaml，spin.xy 接近 (1283, 857)、viewport 有記、balance 讀法有著落
-
-### ⏸ Step 8：全量壓力測試
-- 驗收 Test 5：品牌H 全量（先 calibrate 出 yaml → run 全部）→ 覆蓋率 ≥ 99%
-
-## Critical Files（後續會建立）
-
-- `.claude/skills/test-game-brand/SKILL.md`
-- `.claude/agents/{game-batch-runner,brand-calibrator,backoffice-reconciler}.md`
-- `brands/_schema.yaml` + `brands/_template.yaml`
-- `.mcp.json` + `.claude/settings.local.json` + `README.md`
-
-從舊專案參考（不修改）：
-- `~/project/old-project/drc-brandh-test/report.md` — 品牌H 已驗證參數，calibrate 完成後可用來 sanity check
-- `~/project/old-project/.mcp.json` + `.claude/settings.local.json` — 權限模板（去掉 WSL-only 條目）
+- `.claude/skills/test-game-brand/SKILL.md` ＋ `gen_run_artifacts.py`（run 產物產生器）
+- `.claude/skills/qa-report/`（SKILL.md、`gen_qa_report.py`、`report_common.py`、`gen_detail_only.py`、模板）
+- `.claude/agents/{game-batch-runner,brand-calibrator,backoffice-reconciler,qa-report-writer}.md`
+- `brands/_schema.yaml` + `brands/_template.yaml`（實際 brand yaml gitignored）
+- `.mcp.json(.example)` + `playwright-mcp.config.json` + `.claude/settings.json`（hooks）+ `scripts/`（secret-scan、claude-hooks）
 
 ## 關鍵風險與防呆
 
@@ -287,6 +229,4 @@ QA 上手 5 步：
 
 ## 未決事項
 
-- ~~calibrate 模式互動程度~~ → 已定案**半互動**（Step 7，2026-06-03）
-- ~~後台對帳細節~~ → 已定案配對優先序 `betid` ＞ `code` ＞ 名稱/語義 ＞ 時間窗（2026-06-29 品牌G 48/48 實證，見 `backoffice-reconciler.md`）
 - session 持久化（暫不加 `--user-data-dir`，看實際使用體驗再決定）
