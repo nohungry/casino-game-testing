@@ -38,3 +38,4 @@ Thumbs.db
 # 共用範本是 .mcp.json.example；clone 後 cp .mcp.json.example .mcp.json 再填路徑
 .mcp.json
 !.mcp.json.example
+scripts/secret-scan.local-patterns

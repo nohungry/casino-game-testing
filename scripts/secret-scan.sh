@@ -69,6 +69,20 @@ for f in "${files[@]}"; do
   if [ -n "$hits" ]; then
     while IFS= read -r line; do report "內容" "$f:$line"; done <<< "$hits"
   fi
+
+  # (3) 本機自訂敏感詞（站點/品牌/帳號等「值合法但不得入 repo」的詞）
+  #     詞表放 scripts/secret-scan.local-patterns（gitignored，每行一個 ERE pattern，# 開頭為註解）
+  #     ——詞表本身含敏感詞，絕不 commit；repo 只帶這個讀取機制。
+  local_patterns="scripts/secret-scan.local-patterns"
+  if [ -f "$local_patterns" ]; then
+    while IFS= read -r pat; do
+      case "$pat" in ''|'#'*) continue ;; esac
+      lhits="$(printf '%s\n' "$content" | grep -inE -e "$pat" 2>/dev/null || true)"
+      if [ -n "$lhits" ]; then
+        while IFS= read -r line; do report "本機敏感詞" "$f:$line"; done <<< "$lhits"
+      fi
+    done < "$local_patterns"
+  fi
 done
 
 echo
