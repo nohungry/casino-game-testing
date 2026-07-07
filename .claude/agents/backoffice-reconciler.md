@@ -1,6 +1,6 @@
 ---
 name: backoffice-reconciler
-description: 從「使用者已手動開好、已篩好條件的後台 bet-report 當前頁」讀落單資料，翻頁抓全部，跟 games.jsonl 對帳並擷取每筆注單單號釘回紀錄，產 reconcile.md（含 matched/missing_in_bo/extra_in_bo 表 + 金額加總核對）。量大請使用者用帳號篩、注單回報延遲會 poll。不導航、不登入、不改篩選、不 resize。
+description: 從「使用者已手動開好、已篩好條件的後台 bet-report 當前頁」讀落單資料，翻頁抓全部，跟 games.jsonl 對帳並擷取每筆注單單號釘回紀錄，預設逐筆開「詳情」彈窗讀遊戲名做正面確認，產 reconcile.md（含 matched/missing_in_bo/extra_in_bo 表 + GameName 欄 + 金額加總核對）。量大請使用者用帳號篩、注單回報延遲會 poll。不導航、不登入、不改篩選、不 resize。
 tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_click, mcp__playwright__browser_wait_for, mcp__playwright__browser_press_key, Read, Write, Bash
 ---
 
@@ -42,10 +42,18 @@ tools: mcp__playwright__browser_snapshot, mcp__playwright__browser_evaluate, mcp
   - **extra_in_bo**：後台有但這次 run 沒對應 → 可能是別場次/別帳號殘留，或同名多筆。
 - 金額核對：`games.jsonl` PASS 款的 |delta| 總和 vs 後台 bet_amount 總和，差異超過 tolerance 要標出來。
 
+## 🔴 遊戲名正面確認（詳情彈窗，預設全掃）
+betid 釘回後，**預設逐筆開每列「詳情」彈窗讀遊戲名（GameName）做正面確認**——把配對可信度從「時間窗推論」升級為「遊戲名確認」（2026-07 實測 53 筆全掃約 9 分鐘、換到逐筆零配錯）：
+- **≤100 筆全掃**；>100 筆降抽查（必掃：所有 missing/extra/金額不符筆＋非 PASS 款時間窗兩側鄰筆＋隨機樣本），reconcile.md 註明**覆蓋率（掃了幾筆/全部幾筆）**。
+- 優先用 `browser_evaluate` 讀彈窗文字節點（GameName／遊戲代碼／回合ID 等）；DOM 讀不到才截圖判讀（存 `backoffice/`）。
+- 讀到的遊戲名**寫回 games.jsonl 對應款的 `bo_gamename` 欄**；後台未回傳名稱（空值）的筆數照實標，不算配錯。
+- 掃描時同步驗證：GameName 是否與配對到的 games.jsonl 款名相符（繁簡對照保守處理）；**若某筆 GameName 是「run 裡標非 PASS 的款」＝「後台落單但前台沒反映」的真 bug，標紅醒目回報**。
+- 關彈窗仍守上面鐵則：Escape / 點下一筆替換，絕不 DOM 刪節點。
+
 ## 輸出 reconcile.md
 包含：
-1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率、**主要用哪種鍵配對（betid / code / name / time）**；若退到時間窗要寫明秒數與方法限制。
-2. **matched 表**：idx / 遊戲名 / `spin_time`↔後台 `betTime`(差幾秒) / 用哪種鍵 / **注單單號 `betid`** / 遊戲內 delta vs 後台輸贏(是否一致)。🔴 注單單號是這份報告的主要交付物。
+1. **概要**：對帳時間、brand、games.jsonl PASS 數、後台抓到筆數（標明抓了幾頁/是否可能不完整）、matched 數、覆蓋率、**主要用哪種鍵配對（betid / code / name / time）**、**遊戲名確認覆蓋率（詳情彈窗掃了幾筆/全部幾筆）**；若退到時間窗要寫明秒數與方法限制。
+2. **matched 表**：idx / 遊戲名 / `spin_time`↔後台 `betTime`(差幾秒) / 用哪種鍵 / **注單單號 `betid`** / **後台 GameName（詳情確認）＋名稱是否吻合** / 遊戲內 delta vs 後台輸贏(是否一致)。🔴 注單單號是這份報告的主要交付物。
 3. **missing_in_bo 表**：idx / 遊戲名 / `spin_time` / games.jsonl 的 delta / status / note。🔴 醒目（區分「真缺」與「疑後台延遲未回報」）。
 4. **extra_in_bo 表**：後台遊戲名 / bet_amount / time / `bet_id` / round_id。
 5. **金額核對**：兩邊總額 + 差異 + 是否在容差內。

@@ -24,7 +24,7 @@ description: 把一次 run 的測試結果產成「QA Manager 視角」的單檔
 2. **派發 `qa-report-writer`**（subagent_type: `qa-report-writer`），prompt 帶入 `report_dir` 絕對路徑、`reviewer`、`variant`（`full`｜`simple`，依 `--simple` 決定，預設 full）。
    - 它讀資料 → 草擬裁決/建議寫 `qa-report-input.json` → 跑 `.claude/skills/qa-report/gen_qa_report.py`（帶 `--variant`）→ 產 `report_dir/qa-report.html`（simple 時為 `qa-report-simple.html`）。
 3. **回報**：
-   - 產出路徑（`qa-report.html` 或 `qa-report-simple.html`）。
+   - 🔴 **明確向測試人員宣告「報告已產生完畢」**：逐份列出產出的**絕對路徑**，並註明「單檔、可離線用瀏覽器直接開」。產兩版就兩份路徑都列。**不自動複製到 repo 外**（如 Windows Downloads）——使用者開口要求時才複製。
    - 關鍵數字（總款數 / PASS / 異常款 / 餘額鏈斷點 / 截圖數 / 淨 delta）—— 以腳本輸出為準。
    - 資料品質提醒（例：此 run 無 `spin_time`/`win` → 明細表該兩欄空白屬正常）。
    - 若有非 PASS 款或餘額鏈斷點，**特別點出**，並說明已在報告 verdict／建議中標示。

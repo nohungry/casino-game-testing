@@ -28,8 +28,10 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - **拉霸 / slot**：點 `spin.xy`（或畫面 SPIN 鈕座標）一次＝一注。
 - **crash / 即時倍率類**（下注→倍率上升→崩潰前兌現）：**只有在「下注窗口（回合間倒數）」點下注鈕才生效**；點完要**確認鈕變成「取消/兌現」狀態**才算成立（還是原本「下注」就是沒中窗口，等下一輪重點）。為求穩定 delta，**不要兌現，讓它崩潰＝輸掉整注**（delta = −bet）。注意有的有「兩注面板」，只下一注就好；「全押/all-in」之類會押整個餘額，**絕不要點**。
 - **keno / 選號·即時開獎類**：要**先在號盤選至少一個號，再按下注鈕**，且**選號與按下注要在同一個動作序列內快速做完**（中間隔一次開獎/倒數歸零會把選號清空）。下注後等該局開獎才結算；開獎間隔依款（如 1 分/2 分版）。同樣**避開「全押」**。
+- 🔴 **選擇型通則**（選號/選注區/選方向/選杯…所有「先選再下注」的玩法）：**選取動作＋按下注鈕必須在同一原子動作序列完成**（`browser_run_code_unsafe` 一次做完連續 `page.mouse.click`），跨回合選取會被清空、下注不成立。
 
 **🔴 確認下注真的成立（所有類型共用）**：下注鈕點下去≠下注成功。讀 AFTER 餘額前，先確認其一：鈕狀態改變（變取消/兌現/鎖定）、出現「已下注」提示、當前投注列出現本注、或餘額已即時扣款。**沒確認成立就重點一次（crash 等下一個窗口；keno 重新選號+下注）**；連續失敗才記 `BET_NOT_PLACED`。沒成立就讀 delta 會得到假 0。下注遇「交易錯誤/window closed」多半是按晚了（窗口已關），等下一個窗口重下，不是失敗。
+- ⚠️ **「動畫會跑但餘額全程凍結」樣態**：有的款在測試環境未部署/未開放下注——按鈕會變狀態、畫面動畫照跑，但餘額永不扣、回合乘數/開獎永不啟動、玩家列表始終無本注。多試幾種觸發（不同鈕/等下一窗口/重開一次），**上限約 3-4 分鐘**仍不成立就誠實記 `BET_NOT_PLACED`（note 寫明樣態）繼續下一款，**不要卡死在單款**。
 
 **🔴🔴 即時/快開獎遊戲：讀 AFTER 餘額一定要「等開獎結算完」**：crash/keno/sicbo/hilo/penalty 等是**下注先扣注金、中獎金在開獎那一刻才入帳**。若一下注就立刻讀餘額，只會抓到「扣注」這半段，餘額看起來像 −bet，**中獎會被當成輸**（實測 SIC BO 三注全中卻被讀成 −9，HILO 中 +30 被讀成 −6）。所以：下注後**務必等到該局開獎/崩潰/結算動畫跑完、餘額穩定（讀兩次一致）才當 AFTER**；fast-settle 遊戲尤其別搶讀。最終以**後台注單 `輸/贏` 為準**，遊戲內 delta 與後台 wl 不一致時，幾乎都是「讀太早漏了中獎金」——以後台為準並把 note 記清楚。
 
@@ -41,7 +43,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
    - **新分頁**：用 `browser_tabs` 偵測有沒有新分頁開出；有就 `select` 切過去操作。
    - 兩者皆未出現 → 等 `launch.click_timeout_ms` 再判一次；仍無 → status=`LOAD_FAIL`。
    把判到的模式記進該款 note（供回報，不固化成站點預設）。
-   **順手抓 `code`（對帳可靠 join 鍵）**：啟動 URL 的 `game=`/`gid=` 參數值、或大廳卡片圖檔路徑裡的代碼（如 `.../<code>/<code>.png`），抓得到就記進該款 `code` 欄；抓不到留 null（不要瞎猜）。
+   **順手抓 `code` 與 `gid`（對帳 join 鍵）**：大廳卡片圖檔路徑裡的站台代碼（如 `.../<code>/<code>.png`）記進 `code` 欄；啟動 URL 的 `game=`/`gid=` 參數值記進 `gid` 欄（兩套編號可能不同，都抓到就都記）；抓不到留 null（不要瞎猜）。
 2. **載入**：`browser_wait_for` / 等到 `load_timeout_ms`；再靜置 `post_load_settle_ms`。
 3. **過介紹**：點 `intro.click_xy` 共 `intro.clicks` 次，每次間隔 `intro.interval_ms`。（`intro.clicks==0` 跳過。）
 4. **截圖 loaded**：`browser_take_screenshot` → `screenshots/g{idx}-loaded.png`。
@@ -53,6 +55,7 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 10. **🔴 驗 delta**：`delta = AFTER_BAL - BEFORE_BAL`。
     - `delta != 0`（通常 ≈ `-bet.default`）→ status=`PASS`。
     - `delta == 0` → status=`SPIN_NO_DELTA`（**絕對不准標 PASS**）。
+    - ⚠️ **中獎 ×1 保本也算 delta==0**（`win==bet` → 餘額不變）：這不是可驗的 delta。**重下一注取乾淨 delta**（大多會輸=−bet 或贏≠bet），拿到非零 delta 才標 PASS；note 記「首注 ×1 保本、已重注」。
     - **自我校驗**：`delta` 應 ≈ `win - bet`（未中獎 `win=0` → `delta≈-bet`；中獎 → `delta=win-bet`）。明顯不符就把實際數字記進 `note`（可能餘額讀錯或漏讀 win），不要硬標 PASS。
 11. **退出**：click `exit.parent_trigger`；若 `exit.modal_confirm` 非 null 再 click 它；等 `exit.wait_after_ms` 回到大廳。
 12. **記錄**：append 一行 JSON 到 `games.jsonl`（用 Bash 或 Write 追加），欄位見下。
@@ -75,11 +78,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 ## games.jsonl 每行格式（canonical schema —— 全 repo 唯一真源，報告/對帳工具都吃這套）
 ```json
-{"idx":1,"id":"g001","code":"70001","name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"win":0.00,"betid":null,"before_read_time":"2026-06-18 03:28:40","spin_time":"2026-06-18 03:28:45","after_read_time":"2026-06-18 03:28:55","oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-bal-before.png","g001-spin.png","g001-bal-after.png"],"note":""}
+{"idx":1,"id":"g001","code":"70001","gid":null,"name":"香蕉農場","nth":0,"status":"PASS","before_bal":1000.00,"after_bal":950.00,"delta":-50.00,"bet":50.00,"win":0.00,"betid":null,"bo_gamename":null,"before_read_time":"2026-06-18 03:28:40","spin_time":"2026-06-18 03:28:45","after_read_time":"2026-06-18 03:28:55","oops_count":0,"retries":0,"screenshots":["g001-loaded.png","g001-bal-before.png","g001-spin.png","g001-bal-after.png"],"note":""}
 ```
 - `code`：對帳可靠 join 鍵（見「進入」步驟），抓不到留 null。
+- `gid`（選填）：啟動 URL 裡的**供應商遊戲 id**（如 `gid=`/`game=` 參數值），與站台 `code` 可能是兩套編號——兩個都抓到就都記（`gid` 當對帳/回報開發的備援鍵）；抓不到留 null。
 - `win`：本轉中獎金額（LAST WIN，無中獎=0）；應滿足 `delta ≈ win - bet`。
 - `betid`：**後台格式**的注單單號，通常由 post 對帳（`backoffice-reconciler`）釘回，run 時留 null 即可；「玩完即對帳」流程當場拿到後台注單號也可直接記。⚠️ 遊戲內的「票面ID」與後台注單號**不是同一個**，別把票面 ID 填進來（會壞對帳），要記就放 `note`。
+- `bo_gamename`（選填）：後台「詳情」彈窗讀到的遊戲名，由 post 對帳釘回；run 時留 null。
 - `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。
 - `screenshots`：固定 4 張 `loaded` / `bal-before` / `spin` / `bal-after`。
 

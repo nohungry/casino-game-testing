@@ -6,8 +6,8 @@
 
 本專案目標：把流程抽象成可重用的 Skill + Subagent，但**保持「品牌無預設、站點無預設」**：
 - **brand 參數**（SPIN 座標等）：由 AI 在 calibrate 模式產生，寫到本機 `brands/<brand>.yaml`（gitignored）
-- **站點與帳號**：使用者自己開瀏覽器、登入、停在對的頁面，Skill 從當前頁面接手
-- **Skill 不導航不登入**：只做「批次驅動 + 餘額驗證 + 報告產出」
+- **站點與帳號**：使用者自己開瀏覽器、登入、停在該品牌遊戲大廳（另開好後台投注報表分頁），Skill 從當前頁面接手
+- **Skill 不跨站不登入不換品牌**：品牌內選款/進入/退出遊戲由 AI 操作；只做「批次驅動 + 餘額驗證 + 報告產出」
 
 QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chromium，不依賴 9225 port 轉發。
 
@@ -19,7 +19,7 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 |------|------|
 | 品牌無預設 | repo 不存任何 brand yaml 種子；calibrate 才產生；產出在 `brands/`（gitignored） |
 | 站點無預設 | repo 無 `sites/`、無 `.env`；每次跑由使用者開瀏覽器準備好狀態 |
-| Skill 不導航不登入 | 假設使用者已停在正確頁面；Skill 只 click / 讀 / 驗 / 寫報告 |
+| Skill 不跨站不登入不換品牌 | 使用者停在品牌大廳即可；品牌內選款/進入遊戲由 AI 操作；Skill 不跨站導航、不登入 |
 | 跨平台 | `.mcp.json` 不寫死 CDP URL；MCP 自啟 Chromium |
 | 驗餘額才能 PASS | subagent 強制流程 BEFORE → SPIN → AFTER → delta check；無 delta 不准 PASS |
 | 卡住換新分頁 | 60s 無回應就觸發；新 tab 用 run 開始時記下的 lobby URL |
@@ -32,7 +32,7 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 
 ```mermaid
 flowchart TD
-    PREP["👤 使用者準備：開瀏覽器 · 登入 · 視窗滿版 · 停在對的頁"] --> SK["編排層 Skill /test-game-brand<br/>(不導航、不登入，從當前頁接手)"]
+    PREP["👤 使用者準備：開瀏覽器 · 登入 · 視窗滿版 · 停在品牌大廳 (+後台投注報表分頁)"] --> SK["編排層 Skill /test-game-brand<br/>(不跨站、不登入，從當前頁接手；品牌內選款由 AI 操作)"]
     SK --> MODE{"mode?"}
 
     %% ---------- calibrate ----------
@@ -135,7 +135,7 @@ flowchart TD
 
 | Mode | 指令 | 使用者前置動作 | Skill 動作 |
 |------|------|---------------|-----------|
-| `calibrate` | `calibrate brandh` | 開好一款 sample 遊戲 | 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/brandh.yaml` |
+| `calibrate` | `calibrate brandh` | 停在該品牌遊戲大廳 | AI 自挑大廳第一款進入當 sample → 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/brandh.yaml` |
 | `run` | `run brandh` | 停在該 brand 的遊戲列表頁 | 讀當前頁 URL（記為 lobby URL）→ 抓遊戲清單 → 切批 → spawn batch-runner → 彙整報告 |
 | `post` | `post brandh` | 開後台 bet-report、篩好條件 | 讀當前頁資料 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
 
@@ -199,9 +199,9 @@ locate img[alt=name].nth(n)  → load (load_timeout_ms)
 QA 上手 5 步：
 1. `git clone` 此專案
 2. 在專案資料夾啟動 Claude Code（MCP 自動裝/跑）→ Chromium 視窗自動出來
-3. **使用者**：在 Chromium 內登入站點、進對應品牌遊戲列表頁
-4. 在 Claude Code 輸入 `/test-game-brand calibrate <brand>`（第一次跑該 brand）或 `run <brand>`
-5. 跑完開後台 bet-report 篩好 → `/test-game-brand post <brand>` 對帳
+3. **使用者**：在 Chromium 內登入站點、進對應品牌遊戲列表頁（建議同時開好後台投注報表分頁；之後選款/進遊戲由 AI 操作）
+4. 在 Claude Code 輸入 `/test-game-brand calibrate <brand>`（第一次跑該 brand；AI 自挑大廳第一款當 sample）或 `run <brand>`
+5. 跑完，後台 bet-report 篩好 → `/test-game-brand post <brand>` 對帳（含詳情彈窗遊戲名正面確認）
 
 ## 實作順序（一步一步，每步使用者驗收後才進下一步）
 
@@ -283,7 +283,7 @@ QA 上手 5 步：
 - **stuck tab**：60s 無回應直接開新 tab、navigate 到 run 開始時記下的 lobby URL（[[feedback-new-tab-on-stuck]]）
 - **calibrate fallback**：找不到 SPIN 座標時不准用 default 偷渡，必須寫 `_calibration_gaps` 請使用者確認
 - **權限隔離**：`settings.local.json` gitignored，避免個人權限污染團隊
-- **使用者前置責任**：Skill 不負責導航/登入；使用者跑前必須開好對應頁面，跑錯頁面 Skill 會 fail-fast（讀 URL 確認模式對不上就停）
+- **使用者前置責任**：Skill 不負責跨站導航/登入/後台篩選；使用者跑前停在品牌大廳＋開好後台投注報表分頁即可（品牌內選款/進遊戲由 AI 操作），跑錯頁面 Skill 會 fail-fast（讀 URL 確認模式對不上就停）
 
 ## 未決事項
 

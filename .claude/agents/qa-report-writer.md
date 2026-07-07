@@ -60,7 +60,7 @@ tools: Read, Write, Bash
    - 它會輸出 `report_dir/qa-report.html`（simple 時 `qa-report-simple.html`）並印出一行 JSON（total/pass/abnormal/…）。
    - 若腳本報錯（缺 games.jsonl 等）→ 如實回報，不要硬造 HTML。
 
-4. **回報呼叫端**：產出路徑（依 variant）、腳本印出的關鍵數字、你寫了哪些敘述重點、以及任何資料品質提醒（例如此 run 無 spin_time/win → 明細表該兩欄空白；無 betid → 注單號欄空白屬正常，post 對帳後重產即有）。
+4. **回報呼叫端**：產出路徑（依 variant，**給絕對路徑**）、腳本印出的關鍵數字、你寫了哪些敘述重點、以及任何資料品質提醒（例如此 run 無 spin_time/win → 明細表該兩欄空白；無 betid → 注單號欄空白屬正常，post 對帳後重產即有）。**提醒編排層要向測試人員明確宣告「報告已產生完畢」＋每份絕對路徑**（單檔可離線開；不自動複製到 repo 外，使用者要求才複製）。
 
 ## 邊界
 - 不開瀏覽器、不跑遊戲、不對帳、不改 games.jsonl。只讀、寫 input.json、跑腳本、回報。

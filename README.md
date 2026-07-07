@@ -5,7 +5,7 @@
 兩個核心堅持：
 
 - **品牌無預設** — repo 不存任何品牌參數；每個品牌的 SPIN 座標等由 AI 在 `calibrate` 模式自己探出，寫到本機 `brands/<brand>.yaml`（gitignored）。
-- **站點無預設** — repo 不存帳號/網址；**使用者自己開瀏覽器、登入、停在對的頁面**，Skill 從當前頁接手。**Skill 不導航、不登入**，只做「批次驅動 + 餘額驗證 + 報告產出」。
+- **站點無預設** — repo 不存帳號/網址；**使用者自己開瀏覽器、登入、停在該品牌遊戲大廳**（另開好後台投注報表分頁），Skill 從當前頁接手。**Skill 不跨站、不登入、不換品牌**；品牌內選款/進入/退出遊戲由 AI 操作，做「批次驅動 + 餘額驗證 + 報告產出」。
 
 ---
 
@@ -14,11 +14,11 @@
 1. `git clone` 此專案，然後 `cp .mcp.json.example .mcp.json`（`.mcp.json` 是本機檔、不入 repo）。
 2. 在專案資料夾啟動 Claude Code → MCP 自動裝/跑 → **Chromium 視窗自動跳出**。
    - ⚠️ **不同 OS 可能要改 `.mcp.json`**，見下方「跨平台注意」。
-3. **你自己**：把 Chromium 視窗**拉到滿版**（座標靠滿版維持一致，過程中別改視窗大小），登入站點、進到對應品牌的遊戲列表頁。
+3. **你自己**：把 Chromium 視窗**拉到滿版**（座標靠滿版維持一致，過程中別改視窗大小），登入站點、進到對應品牌的遊戲列表頁（大廳）；**建議同時開好後台投注報表分頁**（run 前會檢查，缺了會提醒）。之後選款/進遊戲都由 AI 操作，你不用自己開遊戲。
 4. 在 Claude Code 輸入：
-   - 首次跑某品牌 → `/test-game-brand calibrate <brand>`（先校準參數）
+   - 首次跑某品牌 → `/test-game-brand calibrate <brand>`（先校準參數；AI 自挑大廳第一款當 sample）
    - 已有參數 → `/test-game-brand run <brand>`（批次跑）
-5. 跑完，自己開後台 bet-report 篩好條件 → `/test-game-brand post <brand>`（對帳）。
+5. 跑完，後台 bet-report 篩好條件 → `/test-game-brand post <brand>`（對帳；含詳情彈窗遊戲名正面確認）。
 
 ---
 
@@ -135,7 +135,7 @@ bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 
 | Mode | 你要先停在哪 | Skill 做什麼 |
 |------|-------------|-------------|
-| `calibrate <brand>` | 開好「一款」sample 遊戲 | 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/<brand>.yaml` |
+| `calibrate <brand>` | 停在該品牌遊戲大廳 | AI 自挑大廳第一款進入當 sample → 探出 SPIN 座標 / 介紹頁 / bet / OOPS pattern → 寫 `brands/<brand>.yaml` |
 | `run <brand>` | 停在該品牌的遊戲列表頁 | 讀當前 URL（記為 lobby）→ 抓遊戲清單 → 切批 → 跑 → 驗餘額 → 出報告 |
 | `post <brand>` | 開後台 bet-report、篩好條件 | 讀當前頁 → 對帳 `games.jsonl` → 寫 `reconcile.md` |
 
@@ -149,8 +149,8 @@ bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 
 ```mermaid
 flowchart TD
-    U["👤 你：開瀏覽器 · 登入 · 視窗滿版 · 停在對的頁<br/>(Skill 不導航、不登入)"] --> Q{"首次測此品牌?"}
-    Q -- "是" --> CAL["/test-game-brand calibrate &lt;brand&gt;<br/>在一款 sample 探 SPIN座標 · 餘額讀法 · intro · 退出"]
+    U["👤 你：開瀏覽器 · 登入 · 視窗滿版 · 停在品牌大廳<br/>(+後台投注報表分頁；Skill 不跨站、不登入)"] --> Q{"首次測此品牌?"}
+    Q -- "是" --> CAL["/test-game-brand calibrate &lt;brand&gt;<br/>AI 自挑大廳第一款當 sample 探 SPIN座標 · 餘額讀法 · intro · 退出"]
     CAL --> CY[("brands/&lt;brand&gt;.yaml<br/>+ calib-meta.json 校準耗時")]
     Q -- "否（已有參數）" --> RUN["/test-game-brand run &lt;brand&gt;<br/>讀+比對 viewport · 抓清單 · 分批 · 逐款驗餘額"]
     CY --> RUN
