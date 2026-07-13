@@ -13,6 +13,19 @@ mode="${1:-staged}"
 self="scripts/secret-scan.sh"
 fail=0
 
+# 本機詞表變更 → 自動升級為全庫體檢（新詞只有掃過存量才算真正生效）
+# hash 記在 .git/ 內（不入版控），全庫掃通過後才更新。
+local_patterns="scripts/secret-scan.local-patterns"
+patterns_marker="$(git rev-parse --git-dir 2>/dev/null)/secret-scan-patterns.sha"
+patterns_hash=""
+if [ -f "$local_patterns" ]; then
+  patterns_hash="$(sha256sum "$local_patterns" 2>/dev/null | awk '{print $1}')"
+  if [ "$mode" != "--all" ] && [ "$patterns_hash" != "$(cat "$patterns_marker" 2>/dev/null)" ]; then
+    echo "secret-scan: 偵測到本機詞表更新 → 自動升級為全庫體檢（--all）"
+    mode="--all"
+  fi
+fi
+
 # 不用 mapfile：macOS 系統 bash 3.2 沒有，跨平台用 while read 收集
 files=()
 if [ "$mode" = "--all" ]; then
@@ -72,8 +85,7 @@ for f in "${files[@]}"; do
 
   # (3) 本機自訂敏感詞（站點/品牌/帳號等「值合法但不得入 repo」的詞）
   #     詞表放 scripts/secret-scan.local-patterns（gitignored，每行一個 ERE pattern，# 開頭為註解）
-  #     ——詞表本身含敏感詞，絕不 commit；repo 只帶這個讀取機制。
-  local_patterns="scripts/secret-scan.local-patterns"
+  #     ——詞表本身含敏感詞，絕不 commit；repo 只帶這個讀取機制。詞表 hash 見開頭：變更會自動觸發全庫體檢。
   if [ -f "$local_patterns" ]; then
     while IFS= read -r pat; do
       case "$pat" in ''|'#'*) continue ;; esac
@@ -92,4 +104,8 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 echo "✅ secret-scan 通過：暫存區無明顯敏感內容。"
+# 掃描通過才記下詞表 hash（下次詞表沒變就不必重複全庫體檢）
+if [ -n "$patterns_hash" ] && [ "$mode" = "--all" ]; then
+  printf '%s' "$patterns_hash" > "$patterns_marker" 2>/dev/null || true
+fi
 exit 0
