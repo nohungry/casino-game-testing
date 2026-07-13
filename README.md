@@ -109,7 +109,7 @@ bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 - 在 Claude Code 內開 session 時，SessionStart hook（`scripts/claude-hooks/ensure-git-hookspath.sh`）會自動檢查並補設 `core.hooksPath`，新 clone 忘了設也不會漏防。
 - `/git-commit` skill 也會在提交前先掃一次。
 - 確認為誤判可 `git commit --no-verify` 略過（請先人工確認）。
-- ⚠️ 掃描器抓不到「站點/帳號/品牌被硬編進通用程式或文件」這種（值合法、但不該入 repo）——這類靠 code review 與 CLAUDE.md 核心不變量把關。
+- **本機敏感詞表**：`scripts/secret-scan.local-patterns`（gitignored、每行一個 ERE、`#` 註解）——放站點/品牌/帳號這類「值合法但不得入 repo」的詞，命中即擋。詞表含敏感詞所以**絕不 commit**、換機器要重建。**詞表一有變更，掃描器會自動升級為全庫體檢（`--all`）**：新詞掃過存量才算生效，通過後記 hash（`.git/` 內）、之後回到輕量暫存區模式。
 
 ### 鐵則機器強制（Claude Code hooks，隨 repo 生效）
 `.claude/settings.json`（團隊共用、已 commit）掛了三個 hook，把 CLAUDE.md 幾條鐵則從「自律」升級成「機器擋下」：
