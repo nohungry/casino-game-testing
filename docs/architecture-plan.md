@@ -6,7 +6,7 @@
 
 本專案目標：把流程抽象成可重用的 Skill + Subagent，但**保持「品牌無預設、站點無預設」**：
 - **brand 參數**（SPIN 座標等）：由 AI 在 calibrate 模式產生，寫到本機 `brands/<brand>.yaml`（gitignored）
-- **站點與帳號**：使用者自己開瀏覽器、登入、建議停在該品牌遊戲大廳（另開好後台投注報表分頁），Skill 從當前頁面接手
+- **站點與帳號**：瀏覽器由 AI 啟動（空白頁）；使用者自己調視窗滿版、導航、登入、建議停在該品牌遊戲大廳（另開好後台投注報表分頁），Skill 從當前頁面接手
 - **Skill 不跨站不登入**：品牌內選款/進入/退出遊戲、同站內品牌切換由 AI 操作（切換前宣告）；只做「批次驅動 + 餘額驗證 + 報告產出」
 
 QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chromium，不依賴 9225 port 轉發。
@@ -18,7 +18,7 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 | 原則 | 表現 |
 |------|------|
 | 品牌無預設 | repo 不存任何 brand yaml 種子；calibrate 才產生；產出在 `brands/`（gitignored） |
-| 站點無預設 | repo 無 `sites/`、無 `.env`；每次跑由使用者開瀏覽器準備好狀態 |
+| 站點無預設 | repo 無 `sites/`、無 `.env`；瀏覽器由 AI 開，站點網址與登入每次由使用者現場提供 |
 | Skill 不跨站不登入 | 使用者建議停在品牌大廳；品牌內選款/進入遊戲、同站品牌切換由 AI 操作（先宣告）；不在目標站點/未登入才停下 |
 | 跨平台 | `.mcp.json` 不寫死 CDP URL；MCP 自啟 Chromium |
 | 驗餘額才能 PASS | subagent 強制流程 BEFORE → SPIN → AFTER → delta check；無 delta 不准 PASS |
@@ -32,7 +32,7 @@ QA 整組（Win/Mac/Linux/WSL）共用同一份 repo；跨平台 MCP 自啟 Chro
 
 ```mermaid
 flowchart TD
-    PREP["👤 使用者準備：開瀏覽器 · 登入 · 視窗滿版 · 停在品牌大廳 (+後台投注報表分頁)"] --> SK["編排層 Skill /test-game-brand<br/>(不跨站、不登入，從當前頁接手；品牌內選款由 AI 操作)"]
+    PREP["🤖 AI 啟動瀏覽器<br/>👤 使用者準備：視窗滿版 · 導航 · 登入 · 停在品牌大廳 (+後台投注報表分頁)"] --> SK["編排層 Skill /test-game-brand<br/>(不跨站、不登入，從當前頁接手；品牌內選款由 AI 操作)"]
     SK --> MODE{"mode?"}
 
     %% ---------- calibrate ----------
@@ -208,6 +208,7 @@ QA 上手 5 步：
 骨架/MCP/schema/四 subagent/三 mode 於 **2026-06-03** 全數建成；其後多品牌實測驗收全部通過：
 - **calibrate / run / post 皆 live 驗收**：多個第三方品牌（2026-06 Canvas slot 型 247 款重驗全過、slot 型全量 rerun；2026-06-26 異質玩法型全品牌；**2026-07-07 重測 52 款 48 PASS、對帳 48/48 平、詳情 GameName 全掃零配錯**；2026-07-05 再一 slot 型品牌）。逐案期望值見 `docs/acceptance-fixtures.md`。
 - 視窗策略定案「**滿版、不 resize**」（viewport=null + --start-maximized；viewport 只讀+比對），並由 `.claude/settings.json` PreToolUse hook 機器強制（resize / 裸檔名截圖一律 deny）。
+- **2026-08-08 修訂**：瀏覽器改由 **AI 啟動**（導航與登入仍永不代勞）；`--start-maximized` 拿掉、**滿版與所在螢幕由使用者自己決定**（多螢幕解析度不同，AI 選錯反而卡人）。`viewport=null` 保留，viewport 基準改以 **calibrate 當下讀到的值**為準。
 - 2026-07-07 起：使用者只需停在品牌大廳（品牌內選款/切換由 AI 操作）、run 有 canary 先行與收尾重試、對帳含詳情彈窗遊戲名正面確認、run 產物由 `gen_run_artifacts.py` 確定性產出。
 
 ## Critical Files（現況）
@@ -220,7 +221,7 @@ QA 上手 5 步：
 
 ## 關鍵風險與防呆
 
-- **viewport 一致性**：MCP 自啟 Chromium 預設 viewport 不一定符合 calibrate 時。策略＝**一律滿版**（`viewport=null` + `--start-maximized`），brand yaml 記校準當下 viewport，subagent 起手**只讀+比對、不一致 fail-fast**；`browser_resize` 已被 hook 硬擋
+- **viewport 一致性**：座標是 viewport-specific，視窗大小/所在螢幕一變座標即失效。策略＝`viewport=null`（頁面跟著真實視窗走）＋**使用者自己調滿版並固定同一台螢幕**，brand yaml 記校準當下 viewport，subagent 起手**只讀+比對、不一致 fail-fast**；`browser_resize` 已被 hook 硬擋（擋的是 AI 程式化改動，使用者手動調整視窗不受影響）
 - **假 PASS 防線**：CRITICAL RULE 在 batch-runner prompt 強調「無 balance delta 不准 PASS」
 - **stuck tab**：60s 無回應直接開新 tab、navigate 到 run 開始時記下的 lobby URL（[[feedback-new-tab-on-stuck]]）
 - **calibrate fallback**：找不到 SPIN 座標時不准用 default 偷渡，必須寫 `_calibration_gaps` 請使用者確認

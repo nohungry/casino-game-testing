@@ -60,10 +60,10 @@ README 刻意不存站點/帳號（站點無預設），所以這些要**另外�
 
 ## 4. Chromium 視窗 + 滿版
 - [ ] **觀察點 A**：Chromium 視窗**有自動跳出**嗎？
-- [ ] **觀察點 B**：跳出後**是不是滿版**？（config 用 `--start-maximized`，這 flag 在 Mac 不一定有效）
-- [ ] 若沒滿版，你怎麼弄滿版的？（手動拖、按綠色鈕全螢幕、還是…）
+- [ ] **觀察點 B**：視窗跳出後**你能不能自己拖成滿版**？（config 已不帶 `--start-maximized`，滿版一律由使用者手動調；Mac 請確認是用「拖曳/綠色鈕」還是其他方式）
+- [ ] 調滿版後 viewport 讀得到嗎？（`browser_evaluate` 讀 `window.innerWidth/innerHeight`，這個值會被 calibrate 記為基準）
 
-📝 結果（`--start-maximized` 在你的 Mac 有效嗎？滿版的正確做法是什麼？）：
+📝 結果（Mac 上滿版的正確做法？調完 viewport 讀到多少？）：
 ```
 
 ```
