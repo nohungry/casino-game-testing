@@ -78,7 +78,7 @@ for g in games:
         f'<td class="n">{esc(g.get("idx"))}</td>'
         f'<td class="n">{esc(g.get("code") or "")}</td>'
         f'<td class="game">{disp_name(g)}</td>'
-        f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
+        f'<td class="n">{money(g.get("bet")) if num(g.get("bet")) else ""}</td>'
         f'<td class="n">{money(g.get("before_bal"))}</td>'
         f'<td class="n">{money(g.get("after_bal"))}</td>'
         f'<td class="n {d_cls}">{signed(d)}</td>'
@@ -90,6 +90,10 @@ for g in games:
         "</tr>")
 
 n_pass = sum(1 for g in games if g.get("status") == "PASS")
+# 捕魚等連續投注型態：bet 欄為該款總投注（發數×砲倍），非單注
+bet_is_total = any(num(g.get("total_bet")) for g in games)
+bet_th = "投注（總額）" if bet_is_total else "投注"
+bet_note = "投注（總額）＝該款總投注（發數×砲倍），非單注；單注見備註。" if bet_is_total else ""
 n_bet = sum(g["bet"] for g in games if num(g.get("bet")))
 n_wl = sum(g["bo_winlose"] for g in games if num(g.get("bo_winlose")))
 
@@ -122,7 +126,7 @@ tbody tr:nth-child(even){{background:#f7f9fb}}
 .st.skip{{background:#eef0f2;color:var(--mut)}}
 </style></head><body>
 <h1>{esc(a.title)}{('　·　' + esc(subtitle)) if subtitle else ''}</h1>
-<div class="sub">逐款下注前後餘額、後台輸贏、SPIN 時間與後台注單號，順序同 idx；可對照後台投注報表逐筆核對。多注單以換行分隔。</div>
+<div class="sub">逐款下注前後餘額、後台輸贏、SPIN 時間與後台注單號，順序同 idx；可對照後台投注報表逐筆核對。多注單以換行分隔。{esc(bet_note)}</div>
 <div class="kpi">
   <span>總款數 <b>{len(games)}</b></span>
   <span>PASS <b>{n_pass}</b></span>
@@ -130,7 +134,7 @@ tbody tr:nth-child(even){{background:#f7f9fb}}
   <span>後台輸贏合計 <b class="{ 'pos' if n_wl>0 else 'neg' }">{signed(round(n_wl,2))}</b></span>
 </div>
 <table><thead><tr>
-<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th><th class="n">投注</th>
+<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th><th class="n">{bet_th}</th>
 <th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th><th class="n">後台輸贏</th>
 <th>投注時間</th><th>注單號</th><th>狀態</th><th>備註</th>
 </tr></thead><tbody>
