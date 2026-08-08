@@ -181,6 +181,11 @@ def main():
     spins = sorted(g["spin_time"] for g in games if g.get("spin_time"))
     has_time = bool(spins)
 
+    # 捕魚等連續投注型態：bet 欄為該款總投注（發數×砲倍），非單注 — 表頭與說明要標明
+    bet_is_total = any(num(g.get("total_bet")) for g in games)
+    bet_th = "投注（總額）" if bet_is_total else "投注"
+    has_win_est = any(g.get("win_est") for g in games)
+
     # ---- meta ----
     lobby_url = meta.get("lobby_url", "")
     host = re.sub(r"^https?://", "", lobby_url).split("/")[0] if lobby_url else nar.get("site", "")
@@ -238,7 +243,7 @@ def main():
                 f'<td class="n">{esc(code_of(g, glist_by_idx))}</td>'
                 f'<td class="game">{esc(g.get("name"))}</td>'
                 + (f'<td class="game">{esc(g.get("bo_gamename") or MINUS)}</td>' if has_bo_gn else "")
-                + f'<td class="n">{esc(g.get("bet")) if num(g.get("bet")) else ""}</td>'
+                + f'<td class="n">{money(g.get("bet"))}</td>'
                 f'<td class="n">{money(g.get("before_bal"))}</td>'
                 f'<td class="n">{money(g.get("after_bal"))}</td>'
                 f'<td class="n {d_cls}">{signed(d)}</td>'
@@ -295,11 +300,13 @@ def main():
             "<table><thead><tr>"
             '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th>'
             + ("<th>後台遊戲名</th>" if has_bo_gn else "")
-            + '<th class="n">投注</th>'
+            + f'<th class="n">{bet_th}</th>'
             '<th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th>'
             '<th class="n">後台輸贏</th><th>SPIN 時間</th><th>注單號</th><th>狀態</th><th>備註</th>'
             "</tr></thead><tbody>" + "".join(srows) + "</tbody></table>"
-            f"<footer>report_dir：{esc(rd)}/ · 來源 games.jsonl {total} 行 · 注單號＝後台「注單」欄，多注單以逗號分隔</footer>"
+            "<footer>report_dir：" + esc(rd) + f"/ · 來源 games.jsonl {total} 行 · 注單號＝後台「注單」欄，多注單以逗號分隔"
+            + ("　·　投注（總額）＝該款總投注（發數×砲倍），非單注；單注見 bet_per_shot／備註" if bet_is_total else "")
+            + "</footer>"
             "</body></html>")
         out_path = a.out or os.path.join(rd, "qa-report-simple.html")
         with open(out_path, "w", encoding="utf-8") as f:
@@ -480,6 +487,8 @@ def main():
         st_cls = "pass" if st == "PASS" else "other"
         d = g.get("delta")
         d_cls = "delta-pos" if (num(d) and d > 0) else "delta-neg"
+        w = g.get("win")
+        w_s = (money(w) + ("<small>（推估）</small>" if g.get("win_est") else "")) if num(w) else ""
         drows.append(
             "<tr>"
             f'<td class="num">{esc(g.get("idx"))}</td>'
@@ -489,7 +498,7 @@ def main():
             + f'<td class="num">{money(g.get("before_bal"))}</td>'
             f'<td class="num">{money(g.get("after_bal"))}</td>'
             f'<td class="num {d_cls}">{signed(d) if num(d) else ""}</td>'
-            f'<td class="num">{money(g.get("win")) if num(g.get("win")) else ""}</td>'
+            f'<td class="num">{w_s}</td>'
             f'<td class="num">{esc(g.get("spin_time") or "")}</td>'
             f'<td class="betid">{esc(betid_str(g))}</td>'
             f'<td><span class="st {st_cls}">{esc(st)}</span></td>'
@@ -498,7 +507,8 @@ def main():
         '<style>.detail-scroll td.betid{font-family:ui-monospace,Menlo,Consolas,monospace;'
         'font-size:11px;color:var(--muted);white-space:nowrap;word-break:keep-all}</style>'
         '<div class="detail-tools">逐款下注前後餘額、SPIN 時間與後台注單號，順序同遊戲序列表（idx）；'
-        '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。</div>'
+        '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。'
+        + ('中獎欄標「推估」者為 delta 反推之推估值，非實讀派彩。' if has_win_est else '') + '</div>'
         '<div class="detail-scroll"><table><thead><tr>'
         '<th class="num">編號</th><th class="num">代碼</th><th>遊戲名</th>'
         + ("<th>後台遊戲名</th>" if full_has_bo_gn else "")

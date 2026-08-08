@@ -40,7 +40,7 @@ description: 把一次 run 的測試結果產成「QA Manager 視角」的單檔
 
 ## 相依檔案（本 skill 自帶）
 - `.claude/skills/qa-report/gen_qa_report.py`：確定性產生器（讀 games.jsonl + run-meta + full-game-list + input.json，算指標/SVG/明細表，套模板輸出 HTML；`--variant simple|full` 選版型）。
-- `.claude/skills/qa-report/report_common.py`：共用模組（games.jsonl 壞行容錯載入 + 欄位別名正規化 + 格式化），兩支產生器共用，新舊兩套 jsonl schema 都吃得下。
+- `.claude/skills/qa-report/report_common.py`：共用模組（games.jsonl 壞行容錯載入 + 欄位別名正規化 + ISO 時間戳正規化 + 格式化），兩支產生器共用，多套 jsonl schema 變體都吃得下。捕魚等連續投注型態：「投注」欄為該款總投注（發數×砲倍，表頭自動標「（總額）」，單注判準看 `bet_per_shot`）；`est_win` 推估值會補進「中獎」欄但一律標「推估」，不冒充實讀。
 - `.claude/skills/qa-report/gen_detail_only.py`：只含「逐款明細表」的滿版獨立報告（`--names` 可帶前台遊戲名對照 JSON，鍵＝`code` 代碼）。
 - `.claude/skills/qa-report/qa-report-template.html`：HTML 模板（CSS + 區塊骨架 + 佔位符，完整版用；精簡版 CSS 內建於腳本）。
 - subagent `qa-report-writer`：編排「讀資料 → 寫 input.json → 跑腳本」。
