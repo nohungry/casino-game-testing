@@ -92,5 +92,19 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 status 合法值：`PASS` / `SPIN_NO_DELTA` / `BET_NOT_PLACED` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。（`BET_NOT_PLACED`＝下注鈕點了但未確認成立，連重試都沒成功；不可標 PASS。）`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪、`delta≈win-bet` 不符等）。dry_run 時 `win`/三個時間可留 null。
 
+### 非拉霸型態的 schema 規範
+🔴 **新型態一律優先寫 canonical 欄**（`bet`/`win`/`before_bal`/`after_bal`/`spin_time`…），型態專屬欄**另加**、**不要重新命名既有欄**（`balance_before`、`spin_at` 這類變體只是徒增報告端 alias 負擔）。時間一律 `YYYY-MM-DD HH:MM:SS`。型態專屬欄：
+
+- **捕魚（連續投注）**：`bet` 填該款總投注（＝發數×砲倍）；另記 `bet_per_shot`（單發砲倍，**>20 紅線判準看這個**）、`shots`（發數）、`fire_start_at`/`fire_end_at`（開火起迄，`spin_time` 填 `fire_start_at` 的值）。`win` 若無法實讀、只能由 delta 反推，填推估值並在 `note` 註明「推估」（報告端會標記，不冒充實讀）。
+- **crash / keno 等**：同回合多注時 `bet` 填合計，單注細節記 `note`。
+
+## 型態別 playbook（下注動作與驗證語意依型態而異，骨架與鐵則不變）
+所有型態共用同一骨架：進入→讀餘額→下注→再讀餘額→驗 delta→退出→append jsonl；差異只在「下注」那一步與記錄欄位。
+
+- **SPIN 型（拉霸/slots）**：預設流程（步驟 1-12）。單注離散，`delta ≈ win - bet` 自我校驗適用。
+- **連續投注型（捕魚、crash）**：無離散 SPIN。捕魚＝按住式連發（`mouse.down`+延遲+`mouse.up`，`mouse.click` 對部分 Cocos canvas 無效）固定發數後停火、**等結算再讀餘額**；crash＝在倒數窗口內下注並確認成立。驗證仍是 delta≠0，但 delta 幅度＝總投注±回沖，不能拿單注推。
+- **限時窗口型（真人桌台）**：下注窗口循環出現（例如 43s 一輪），**偵測窗口與下注必須在同一段腳本內完成**（分開跑會錯過窗口）；預設籌碼常超過 20，須先改小再下注。結算等開牌/派彩完成才讀餘額。
+- 遇到不屬於以上任何型態的新玩法：套骨架、欄位遵守上面 schema 規範，並在回報中明講「新型態＋建議補進本 playbook 的觀察」。
+
 ## 回報給呼叫端
 跑完整批，回傳：處理款數、各 status 計數、PASS 的總 delta、以及任何需要 calibrate 補的觀察（例如「餘額只能靠截圖讀，建議 balance.source 標記」）。**據實回報，跑不完或不確定就說，不要美化。**

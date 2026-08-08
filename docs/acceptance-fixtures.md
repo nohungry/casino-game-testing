@@ -29,5 +29,10 @@
 - **post**：matched **48/48**、missing_in_bo **0**、extra 5（2 canary + 3 ×1 保本重注，皆預期）；逐筆 delta==後台輸贏 47/48（1 筆中獎晚結算，與次款餘額跳點 +3.99 自我印證）；**詳情彈窗 GameName 53/53 全掃、零配錯**；betid + bo_gamename 全數釘回。
 - 產物：本機 reports/（未入 repo）。
 
+## qa-report 非拉霸 schema 回歸（2026-08-06 品牌K／品牌F 實測，本機 reports/ 以日期識別，未入 repo）
+兩個 run 的 games.jsonl 欄名/時間格式偏離 canonical，是 `report_common.py` alias + `norm_ts` 的回歸用例：
+- **品牌K run**（拉霸、`balance_before/after` + `spin_at` ISO 時間）：**不帶 `--input`** 跑 `gen_qa_report.py` → 測試時段須顯示 `11:43 – 11:52` 而非 `2026- – 2026-`（ISO 打穿 `_hhmm` 的回歸），執行時長算得出、明細表時間顯示 canonical 格式。
+- **品牌F run**（捕魚、`total_bet`/`bet_per_shot`/`fire_start_at`/`est_win`）：投注/進入前後/SPIN 時間/中獎四欄皆非空；表頭「投注（總額）」、中獎值帶「（推估）」標記；total/PASS/net_delta 與 run-summary 一致（2 款、PASS 2、net −1.4）。
+
 ## 參考的歷史脈絡
 品牌H 全量 247 款：**初跑曾 65 款假 PASS（只點 SPIN 不驗餘額，真落單率 72.5%）**；導入「驗餘額才 PASS」鐵則後重驗，247 款全數通過。兩個數字是同一批遊戲**先後兩次**的結果，不矛盾。
