@@ -76,6 +76,14 @@ WSL 上 playwright MCP 預設會去找系統 chrome（沒裝），要明確指�
 macOS / Windows / 一般 Linux 桌面通常**不用加** `--executable-path`，範本原樣即可。
 
 > 改完 `.mcp.json` 要**重啟 Claude Code** 才生效。`.mcp.json` 已 gitignore，是各人本機檔，改它不會影響別人。
+> `playwright-mcp.config.json`（視窗設定）**同樣要重啟**：MCP server 在自己啟動時就把 config 讀進記憶體並快取，之後再開瀏覽器都沿用舊值。
+
+### 瀏覽器「本來看得到、後來消失」（Linux/WSL 桌面環境）
+跟上面「缺 lib 導致視窗跳不出來」是**不同的問題**：瀏覽器原本開得好好的，放置一段時間（或桌面工作階段中斷、鎖定、休眠後重連）再回來，**視窗不見了但 process 還活著** —— MCP 仍能列分頁、執行 JS，只是畫面不再被繪製出來。
+
+- 判斷：`pgrep -af chrome-linux64/chrome` 有東西、`browser_tabs list` 也回得出分頁，但桌面上找不到視窗。
+- 修法：`browser_close` 後重新 `browser_navigate` 開一顆新的即可（**不必**重裝 lib、不必重啟 Claude Code）。持久 profile 會沿用，登入 cookie 不會掉。
+- ⚠️ 若你的機器同時跑**多個** playwright／chrome-devtools MCP（例如另一個專案用 `--cdp-endpoint` 連別的瀏覽器），關之前先確認你關的是**哪一顆**：用 `pgrep -P <本專案 MCP server pid>` 找出它的子 process，那個才是本專案的瀏覽器。
 
 ### Python 環境（uv）— 報告產生器用
 QA 報告產生器（`.claude/skills/qa-report/gen_qa_report.py`、`gen_detail_only.py`）跑在**專案獨立的 `.venv`（Python 3.13）**，用 [uv](https://docs.astral.sh/uv/) 管理（新世代工具，pip/venv/pyenv 合一、免 sudo 就能裝任意 Python 版本）。
