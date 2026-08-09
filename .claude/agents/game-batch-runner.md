@@ -85,6 +85,10 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 - `code`：對帳可靠 join 鍵（見「進入」步驟），抓不到留 null。
 - `gid`（選填）：啟動 URL 裡的**供應商遊戲 id**（如 `gid=`/`game=` 參數值），與站台 `code` 可能是兩套編號——兩個都抓到就都記（`gid` 當對帳/回報開發的備援鍵）；抓不到留 null。
 - `win`：本轉中獎金額（LAST WIN，無中獎=0）；應滿足 `delta ≈ win - bet`。
+  🔴 **只有實際從畫面讀到中獎金額才可以寫 `win`。**若該品牌沒有中獎金顯示元素、只能用
+  `delta + bet` 反推，**一律寫進 `est_win` 欄（不要寫 `win`）**，並在 `note` 註明「推估」。
+  報告端只認欄名：`est_win` 才會自動標「（推估）」，寫成 `win` 會讓推估值在明細表中
+  與實測值外觀完全相同（2026-08-08 裁示：推估值可進報告但一律要標記）。整批都推估就整批寫 `est_win`。
 - `betid`：**後台格式**的注單單號，通常由 post 對帳（`backoffice-reconciler`）釘回，run 時留 null 即可；「玩完即對帳」流程當場拿到後台注單號也可直接記。⚠️ 遊戲內的「票面ID」與後台注單號**不是同一個**，別把票面 ID 填進來（會壞對帳），要記就放 `note`。
 - `bo_gamename`（選填）：後台「詳情」彈窗讀到的遊戲名，由 post 對帳釘回；run 時留 null。
 - `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。

@@ -15,7 +15,8 @@ import sys
 
 # 復用 qa-report 的共用模組（容錯載入 + 欄位正規化 + 格式化）
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "qa-report"))
-from report_common import betid_str, load_games, num  # noqa: E402
+from report_common import (betid_str, dedupe_retries, load_jsonl,  # noqa: E402
+                           normalize_games, num)
 
 CSV_COLS = ["idx", "code", "name", "before_bal", "after_bal", "delta", "bet", "win",
             "before_read_time", "spin_time", "after_read_time", "betid", "bo_gamename", "status"]
@@ -45,7 +46,11 @@ def main():
     games_path = os.path.join(rd, "games.jsonl")
     if not os.path.exists(games_path):
         sys.exit(f"ERROR: 找不到 {games_path}，請先跑 run。")
-    games = sorted(load_games(games_path), key=lambda g: (g.get("idx") is None, g.get("idx")))
+    # sorted 是穩定排序，故同一 idx 內仍保留 jsonl 的先後順序，
+    # dedupe_retries 取最後一行（＝收尾重試補的新紀錄）。
+    all_rows = sorted(normalize_games(load_jsonl(games_path)),
+                      key=lambda g: (g.get("idx") is None, g.get("idx")))
+    games, n_superseded = dedupe_retries(all_rows)
     meta = load_json(os.path.join(rd, "run-meta.json"), {}) or {}
     glist = ((load_json(os.path.join(rd, "full-game-list.json"), {}) or {}).get("games")) or []
     total_listed = len(glist) or len(games)
@@ -85,6 +90,8 @@ def main():
     L.append("- 各狀態：" + "、".join(f"{k} {v}" for k, v in sorted(by_status.items(), key=lambda kv: -kv[1])))
     L.append(f"- **PASS 款總 delta：{pass_delta}**")
     L.append(f"- 已記後台注單號（betid）：{n_betid} 款" + ("" if n_betid else "（run 完為 0 屬正常，post 對帳後重跑本腳本帶入）"))
+    if n_superseded:
+        L.append(f"- 重試取代的舊紀錄：{n_superseded} 行（同 idx 以最後一行為準；舊行仍留在 games.jsonl 供追溯）")
     L.append("")
     if non_pass:
         L.append("## 非 PASS 款")
@@ -110,6 +117,7 @@ def main():
         f.write("\n".join(L) + "\n")
 
     print(json.dumps({"out_md": md_path, "out_csv": csv_path, "rows": len(games),
+                      "superseded_rows": n_superseded,
                       "by_status": by_status, "pass_delta": pass_delta,
                       "betid_rows": n_betid, "bo_gamename": has_bo_gn}, ensure_ascii=False))
 

@@ -81,8 +81,28 @@ def normalize_games(rows):
     return rows
 
 
+def dedupe_retries(rows):
+    """同一 idx 有多行 = 收尾重試補的新紀錄 → 以「最後一行」為準
+    （test-game-brand SKILL.md 6.5：重試成功補一行新紀錄，彙整時以新行為準）。
+
+    回傳 (kept_rows, n_superseded)。舊行只是不列入彙整，仍留在 games.jsonl 供追溯；
+    重試的來龍去脈靠新行的 note 欄呈現，不靠把失敗行留在表上充當證據
+    ——留著會讓 KPI 的「異常 N 款」把已修好的款算成失敗，反而誤導。
+    idx 為 None 的行不做去重（無從判斷是否同一款）。
+    """
+    last_pos = {}
+    for i, g in enumerate(rows):
+        if g.get("idx") is not None:
+            last_pos[g["idx"]] = i
+    kept = [g for i, g in enumerate(rows)
+            if g.get("idx") is None or last_pos[g["idx"]] == i]
+    return kept, len(rows) - len(kept)
+
+
 def load_games(path):
-    return normalize_games(load_jsonl(path))
+    """載入 + 正規化 + 重試去重（彙整用）。要拿到未去重的原始行請用 load_jsonl。"""
+    kept, _ = dedupe_retries(normalize_games(load_jsonl(path)))
+    return kept
 
 
 # ---------- 格式化 ----------
