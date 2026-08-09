@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""gen_smoke_report.py — 跨品牌載入冒煙檢查的聚合器。
+
+讀 <umbrella_dir>/brands/*/games.jsonl（每品牌一個 report_dir），確定性產出
+<umbrella_dir>/smoke-report.md（可選 --html）。所有數字由資料算出，不靠人心算。
+
+🔴 本報告不含任何 PASS：本任務不下注、不驗餘額，故沒有任何一款構成本專案定義的
+   PASS（PASS 的唯一定義是「已驗證餘額 delta ≠ 0」）。LAUNCH_OK 只代表前端資產
+   載入成功，不代表可下注、可結算、後台會產生注單。
+
+用法：
+    uv run .claude/skills/smoke-launch/gen_smoke_report.py <umbrella_dir> [--html]
+（無 uv 時 python3 亦可；純標準庫。）
+"""
+import argparse
+import glob
+import html
+import json
+import os
+import sys
+
+# 復用 qa-report 的共用模組（壞行容錯 + 欄位別名正規化 + 重試去重）
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "qa-report"))
+from report_common import dedupe_retries, load_jsonl, normalize_games  # noqa: E402
+
+# 顯示順序固定，讓每次產出的表格欄位一致（缺的印 0，不要動態省略欄位）
+STATUSES = ["LAUNCH_OK", "LAUNCH_BLOCKED", "LAUNCH_TIMEOUT",
+            "LAUNCH_NO_RESPONSE", "STUCK_RECOVERED", "SKIPPED"]
+
+SCOPE_NOTICE = (
+    "> 🔴 **本輪只驗「能否載入到 start / splash 畫面」。全程未下注、未讀取或比對任何餘額，"
+    "因此本報告中沒有任何一款構成本專案定義的 PASS**（PASS 的唯一定義是「已驗證餘額 delta ≠ 0」）。\n"
+    "> `LAUNCH_OK` **僅代表前端資產載入成功**，不代表該款可下注、可結算，或後台會產生注單。"
+)
+
+CANNOT_DETECT = """\
+1. 🔴 **最大盲區 —— 「動畫跑但餘額凍結」會被記成 `LAUNCH_OK`。** 有些款前端資產完整載入、
+   splash 正常、甚至主畫面可操作，但餘額永不變動、下注永不成立、後台 0 筆。本方法**完全偵測不到**。
+   → **「能開起來」≠「能玩」≠「能下注」≠「能結算入後台」。**
+2. **無法區分「未開通」與「當下抖動」**：單次量測非統計。BLOCKED/TIMEOUT 可能是網路或 CDN 瞬時問題，
+   收尾重試一輪只是緩解。
+3. **跨域 iframe 內只能靠像素判讀**：警告若畫在 canvas 上、或使用未涵蓋的語言/文案，關鍵字掃描會漏判，
+   → 可能被誤標成 `LAUNCH_OK`。目視判定含主觀性。
+4. **`splash` 與 `main` 的分界本身模糊**：有些款沒有 splash 直接進主畫面。`到達層級` 欄是判讀不是事實。
+5. **登入態或遊戲錢包狀態污染**：token 中途過期、該品牌錢包沒錢，都會讓大量款變 BLOCKED，
+   外觀與「未開通」難以區分，且無法回溯修正。
+6. **不代表生產環境**，也**不是同一時刻的快照**（整批跨數小時甚至跨天，期間可能有部署或維護窗口）。
+7. **遊戲代碼抓不到時 join 不可靠**：只能靠品牌內序號，跨 run 比對會失準（大廳排序會變）。
+8. **未覆蓋**手機版／其他解析度／其他會員層級／其他入口（搜尋、熱門、收藏）。
+9. **統計不獨立**：同供應商同引擎的款多半共命運，「OK 率 N%」**不能**解讀為「隨機抽一款有 N% 機率可用」。
+
+**明確不能下的結論**：「X 款通過測試」「品牌 Y 可以上線」「OK 率＝可用率」「這批遊戲沒問題」。
+**可以下的結論只有**：「在 <時間> 的 <站點>，這 X 款前端載入到了 start/splash 畫面；這 Y 款跳出了『<原文>』」。"""
+
+
+def load_json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def cell(v):
+    """None/空 一律印破折號，不要印 None 或 0 冒充量過的值。"""
+    return "—" if v in (None, "") else str(v)
+
+
+def pct(n, d):
+    return f"{n / d * 100:.0f}%" if d else "—"
+
+
+def n_tested(counts):
+    """已測 = 取得結論的款數。🔴 SKIPPED 不算已測（根本沒跑），算進去會虛報覆蓋率。"""
+    return sum(v for k, v in counts.items() if k != "SKIPPED")
+
+
+def brand_verdict(counts, meta_verdict, listed=0):
+    """品牌層級判讀。meta_verdict（brands.json 記的）優先，它涵蓋『根本沒跑成』的情形。
+
+    🔴 覆蓋率不足 100% 時措辭一律標明「抽樣」：只驗了 5/243 卻寫「全數未能載入」
+    會讓人以為 243 款都驗過，是最容易被誤引用的一句話。
+    """
+    if meta_verdict:
+        return meta_verdict
+    tested = n_tested(counts)
+    if not tested:
+        return "未測"
+    ok = counts.get("LAUNCH_OK", 0)
+    partial = listed and tested < listed
+    if ok == tested:
+        return f"抽樣全數可載入（{tested}/{listed}）" if partial else "全數可載入"
+    if ok == 0:
+        return f"抽樣全數未能載入（{tested}/{listed}）" if partial else "全數未能載入"
+    return f"抽樣部分可載入（{ok}/{tested}）" if partial else "部分可載入"
+
+
+def collect(umbrella):
+    """回傳 (rows, brands)；rows 是攤平的逐款紀錄，brands 是每品牌彙總。"""
+    meta_by_slug = {}
+    for b in (load_json(os.path.join(umbrella, "brands.json"), []) or []):
+        if isinstance(b, dict) and b.get("bslug"):
+            meta_by_slug[b["bslug"]] = b
+
+    rows, brands = [], []
+    for gpath in sorted(glob.glob(os.path.join(umbrella, "brands", "*", "games.jsonl"))):
+        bdir = os.path.dirname(gpath)
+        bslug = os.path.basename(bdir)
+        bmeta = meta_by_slug.get(bslug, {})
+
+        games, n_superseded = dedupe_retries(normalize_games(load_jsonl(gpath)))
+        games.sort(key=lambda g: (g.get("idx") is None, g.get("idx")))
+
+        # 分母優先序：該品牌的 full-game-list.json ＞ 盤點階段記的 listed_count ＞ 已跑行數
+        listed = len((load_json(os.path.join(bdir, "full-game-list.json"), {}) or {}).get("games") or [])
+        if not listed:
+            listed = bmeta.get("listed_count") or 0
+        probe = load_json(os.path.join(bdir, "brand-probe.json"), {}) or {}
+
+        counts = {}
+        for g in games:
+            st = g.get("status") or "?"
+            counts[st] = counts.get(st, 0) + 1
+        for g in games:
+            g["_bslug"] = bslug
+            g["_bname"] = bmeta.get("display_name") or bslug
+        rows.extend(games)
+
+        brands.append({
+            "bslug": bslug,
+            "name": bmeta.get("display_name") or bslug,
+            "listed": listed or len(games),
+            "tested": n_tested(counts),
+            "skipped": counts.get("SKIPPED", 0),
+            "counts": counts,
+            "superseded": n_superseded,
+            "verdict": brand_verdict(counts, bmeta.get("brand_verdict"), listed),
+            "confidence": (probe.get("confidence") or {}).get("ready"),
+            "gaps": probe.get("gaps") or [],
+            "probe": probe,
+        })
+
+    # 品牌層級不可用的（沒有 games.jsonl，連目錄都可能沒有）也要出現在報告裡
+    seen = {b["bslug"] for b in brands}
+    for slug, bmeta in meta_by_slug.items():
+        if slug in seen:
+            continue
+        # 還沒跑的品牌也要進表：分母取盤點階段的 listed_count 或已產的 full-game-list.json
+        fgl = len((load_json(os.path.join(umbrella, "brands", slug, "full-game-list.json"), {})
+                   or {}).get("games") or [])
+        brands.append({
+            "bslug": slug, "name": bmeta.get("display_name") or slug,
+            "listed": fgl or bmeta.get("listed_count") or 0,
+            "tested": 0, "skipped": 0, "counts": {}, "superseded": 0,
+            "verdict": bmeta.get("brand_verdict") or "未測",
+            "confidence": None, "gaps": [], "probe": {},
+        })
+    brands.sort(key=lambda b: b["name"])
+    return rows, brands
+
+
+def build_md(umbrella, rows, brands, meta):
+    tot_listed = sum(b["listed"] for b in brands)
+    tot_tested = sum(b["tested"] for b in brands)      # 不含 SKIPPED
+    tot_skipped = sum(b["skipped"] for b in brands)
+    agg = {}
+    for r in rows:
+        st = r.get("status") or "?"
+        agg[st] = agg.get(st, 0) + 1
+    n_ok = agg.get("LAUNCH_OK", 0)
+
+    L = []
+    L.append(f"# 遊戲載入冒煙檢查 — {cell(meta.get('site_host'))} {cell(meta.get('started_at'))}\n")
+    L.append(SCOPE_NOTICE + "\n")
+
+    L.append("## 1. 執行資訊\n")
+    L.append("| 項目 | 值 |")
+    L.append("|---|---|")
+    for k, v in [("站點", meta.get("site_host")), ("帳號", meta.get("account")),
+                 ("開始", meta.get("started_at")), ("結束", meta.get("ended_at")),
+                 ("viewport", meta.get("viewport")), ("登入態已驗證", meta.get("login_verified")),
+                 ("方法版本", meta.get("method_version")), ("resume 次數", meta.get("resume_count")),
+                 ("涵蓋品牌數", len(brands)), ("清單總款數", tot_listed),
+                 ("已測款數（不含 SKIPPED）", tot_tested), ("未測（SKIPPED）", tot_skipped)]:
+        L.append(f"| {k} | {cell(v)} |")
+    L.append("")
+
+    L.append("## 2. 總覽\n")
+    L.append("| 狀態 | 款數 | 佔已測 |")
+    L.append("|---|---:|---:|")
+    for st in [s for s in STATUSES if s != "SKIPPED"] + sorted(
+            k for k in agg if k not in STATUSES):
+        if agg.get(st):
+            L.append(f"| `{st}` | {agg[st]} | {pct(agg[st], tot_tested)} |")
+    L.append(f"| **已測合計** | **{tot_tested}** | |")
+    if tot_skipped:
+        L.append(f"| `SKIPPED`（未測，不計入已測） | {tot_skipped} | — |")
+    L.append("")
+    L.append(f"**可載入（`LAUNCH_OK`）：{n_ok} / {tot_tested} 款**"
+             f"（佔已測 {pct(n_ok, tot_tested)}；佔清單總數 {pct(n_ok, tot_listed)}）"
+             f" — 僅代表前端載入成功，未驗餘額。\n")
+
+    L.append("## 3. 品牌總表\n")
+    head = "| 品牌 | 清單 | 已測 | " + " | ".join(s.replace("LAUNCH_", "") for s in STATUSES) + " | 覆蓋率 | 判讀 | 判定信心 |"
+    L.append(head)
+    L.append("|---|---:|---:|" + "---:|" * len(STATUSES) + "---:|---|---|")
+    for b in brands:
+        cnt = " | ".join(str(b["counts"].get(s, 0)) for s in STATUSES)
+        L.append(f"| {b['name']} | {b['listed']} | {b['tested']} | {cnt} | "
+                 f"{pct(b['tested'], b['listed'])} | {b['verdict']} | {cell(b['confidence'])} |")
+    L.append("")
+
+    ok_rows = [r for r in rows if r.get("status") == "LAUNCH_OK"]
+    L.append(f"## 4. ★ 可載入清單（{len(ok_rows)} 款）\n")
+    if ok_rows:
+        L.append("> 「splash」＝畫面出現遊戲內容（可能仍在跑遊戲自帶的載入條）；"
+                 "「主畫面」＝載入條跑完、進到可操作畫面。兩者分開記，避免把「還在載入」當成「已可玩」。\n")
+        L.append("| 品牌 | # | 代碼 | 遊戲名 | splash 耗時 | 主畫面 | 啟動方式 | 判定時間 |")
+        L.append("|---|---:|---|---|---:|---|---|---|")
+        for r in ok_rows:
+            sp = r.get("reached_splash_ms", r.get("launch_ms"))
+            mn = r.get("reached_main_ms")
+            chk = r.get("main_check")
+            if isinstance(mn, (int, float)):
+                main_txt = f"✅ {mn/1000:.0f}s"
+            elif chk == "timeout":
+                main_txt = "⏱ 逾時未達"
+            elif chk == "start_gate":
+                main_txt = "⏸ 停在開始鈕"
+            elif chk in (None, "not_checked"):
+                main_txt = "未驗證"
+            else:
+                main_txt = cell(chk)
+            L.append(f"| {r['_bname']} | {cell(r.get('idx'))} | {cell(r.get('code'))} | "
+                     f"{cell(r.get('name'))} | "
+                     f"{f'{sp/1000:.1f}s' if isinstance(sp, (int, float)) else '—'} | "
+                     f"{main_txt} | {cell(r.get('surface'))} | {cell(r.get('opened_at'))} |")
+        n_main = sum(1 for r in ok_rows if isinstance(r.get("reached_main_ms"), (int, float)))
+        n_to = sum(1 for r in ok_rows if r.get("main_check") == "timeout")
+        n_gate = sum(1 for r in ok_rows if r.get("main_check") == "start_gate")
+        n_nc = len(ok_rows) - n_main - n_to - n_gate
+        L.append(f"\n小計：載入到 splash **{len(ok_rows)} 款**；其中確認進到可操作主畫面 **{n_main} 款**、"
+                 f"停在遊戲自帶「開始」鈕前 {n_gate} 款、等到逾時仍未進主畫面 {n_to} 款、未做主畫面驗證 {n_nc} 款。")
+        if n_gate:
+            L.append("\n> ⏸ **「停在開始鈕」不是失敗**：資源已載完、畫面靜止、網路已靜默，只是該引擎需要再點一次"
+                     "遊戲自帶的「開始」才會進主畫面。**本輪未點該鈕** —— 專案鐵則禁止碰投注 UI，"
+                     "而部分引擎的「開始」可能等同旋轉（＝下注）。這些款的主畫面可達性**尚未驗證**，"
+                     "需要另行裁示後才能確認。")
+    else:
+        L.append("_無_")
+    L.append("")
+
+    L.append("## 5. 未能載入清單\n")
+    any_bad = False
+    sub_no = 0
+    for st in [s for s in STATUSES if s != "LAUNCH_OK"]:
+        sub = [r for r in rows if r.get("status") == st]
+        if not sub:
+            continue
+        any_bad = True
+        sub_no += 1
+        L.append(f"### 5.{sub_no} `{st}`（{len(sub)} 款）\n")
+        if st == "LAUNCH_BLOCKED":
+            L.append("| 品牌 | # | 代碼 | 遊戲名 | 警告原文 | 警告來源 | 截圖 |")
+            L.append("|---|---:|---|---|---|---|---|")
+            for r in sub:
+                shots = r.get("screenshots") or []
+                L.append(f"| {r['_bname']} | {cell(r.get('idx'))} | {cell(r.get('code'))} | "
+                         f"{cell(r.get('name'))} | {cell(r.get('block_text'))} | "
+                         f"{cell(r.get('block_kind'))} | {cell(shots[0] if shots else None)} |")
+        else:
+            L.append("| 品牌 | # | 代碼 | 遊戲名 | 備註 | 截圖 |")
+            L.append("|---|---:|---|---|---|---|")
+            for r in sub:
+                shots = r.get("screenshots") or []
+                L.append(f"| {r['_bname']} | {cell(r.get('idx'))} | {cell(r.get('code'))} | "
+                         f"{cell(r.get('name'))} | {cell(r.get('note'))} | "
+                         f"{cell(shots[0] if shots else None)} |")
+        L.append("")
+    if not any_bad:
+        L.append("_無_\n")
+
+    bad_brands = [b for b in brands if b["tested"] == 0 or b["verdict"] in ("BRAND_UNAVAILABLE", "PROBE_FAILED")]
+    L.append("## 6. 品牌層級不可用 / 未探測成功\n")
+    if bad_brands:
+        L.append("| 品牌 | 判讀 | 清單款數 | 未探到的項目 |")
+        L.append("|---|---|---:|---|")
+        for b in bad_brands:
+            L.append(f"| {b['name']} | {b['verdict']} | {b['listed']} | {cell('、'.join(b['gaps']) if b['gaps'] else None)} |")
+    else:
+        L.append("_無_")
+    L.append("")
+
+    L.append("## 7. 🔴 本報告測不到什麼\n")
+    L.append(CANNOT_DETECT + "\n")
+
+    L.append("## 8. 附錄\n")
+    n_sup = sum(b["superseded"] for b in brands)
+    if n_sup:
+        L.append(f"- 收尾重試取代的舊紀錄：{n_sup} 行（同 idx 以最後一行為準；舊行仍留在 games.jsonl 供追溯）")
+    L.append(f"- 產物根目錄：`{os.path.abspath(umbrella)}`")
+    L.append(f"- 續跑指令：`/smoke-launch --resume {os.path.abspath(umbrella)}`")
+    L.append("- 每品牌 probe 參數：`brands/<bslug>/brand-probe.json`；逐款原始紀錄：`brands/<bslug>/games.jsonl`")
+    L.append("")
+    return "\n".join(L) + "\n"
+
+
+def build_html(md_text, meta):
+    """極簡 HTML：自帶標籤與色碼，不重用 qa-report 版型（那套的標籤寫死成
+    「異常款 / 假 PASS」，會把整批冒煙呈現成 0% 紅燈）。"""
+    css = """body{font:14px/1.7 system-ui,-apple-system,"Noto Sans TC",sans-serif;max-width:1200px;
+margin:2rem auto;padding:0 1rem;color:#1a1a1a;background:#fff}
+table{border-collapse:collapse;width:100%;margin:.6rem 0;font-size:13px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd;padding:.35rem .5rem;text-align:left}th{background:#f5f5f5}
+code{background:#f2f2f2;padding:.1rem .3rem;border-radius:3px}
+blockquote{border-left:4px solid #d33;background:#fff5f5;margin:1rem 0;padding:.6rem 1rem}
+h1{border-bottom:2px solid #333;padding-bottom:.3rem}h2{margin-top:2rem;border-bottom:1px solid #ccc}
+@media(prefers-color-scheme:dark){body{background:#161616;color:#e8e8e8}
+th{background:#242424}th,td{border-color:#3a3a3a}code{background:#242424}
+blockquote{background:#2a1a1a}h1{border-color:#888}h2{border-color:#444}}"""
+    return (f"<title>遊戲載入冒煙檢查 — {html.escape(str(meta.get('site_host') or ''))}</title>"
+            f"<style>{css}</style><pre style='white-space:pre-wrap;font:inherit'>"
+            f"{html.escape(md_text)}</pre>")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("umbrella_dir")
+    ap.add_argument("--html", action="store_true")
+    a = ap.parse_args()
+    um = a.umbrella_dir.rstrip("/")
+
+    if not os.path.isdir(os.path.join(um, "brands")):
+        sys.exit(f"ERROR: 找不到 {um}/brands/，請先跑 smoke-launch 的 Phase 1-3。")
+
+    meta = load_json(os.path.join(um, "smoke-meta.json"), {}) or {}
+    rows, brands = collect(um)
+    if not rows and not brands:
+        sys.exit(f"ERROR: {um}/brands/ 底下沒有任何 games.jsonl，無資料可彙整。")
+
+    md = build_md(um, rows, brands, meta)
+    md_path = os.path.join(um, "smoke-report.md")
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(md)
+
+    out = {"out_md": md_path, "brands": len(brands), "tested": len(rows),
+           "by_status": {}, "listed": sum(b["listed"] for b in brands)}
+    for r in rows:
+        st = r.get("status") or "?"
+        out["by_status"][st] = out["by_status"].get(st, 0) + 1
+
+    if a.html:
+        html_path = os.path.join(um, "smoke-report.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(build_html(md, meta))
+        out["out_html"] = html_path
+
+    print(json.dumps(out, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
