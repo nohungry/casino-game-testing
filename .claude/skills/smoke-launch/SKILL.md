@@ -16,9 +16,13 @@ description: 跨品牌「遊戲載入冒煙檢查」—— 逐款點開，確認
 
 ## 指令格式
 ```
-/smoke-launch [--brands a,b] [--limit-per-brand N] [--resume <umbrella_dir>] [--html]
+/smoke-launch [--category slots|live|fishing] [--brands a,b] [--limit-per-brand N]
+              [--resume <umbrella_dir>] [--html]
 ```
-沒給 `--brands` 就是「當前分類全部品牌」。`--limit-per-brand` 用於抽樣。
+沒給 `--brands` 就是「該分類全部品牌」。`--limit-per-brand` 用於抽樣。
+`--category` 沒給就從當前 `location.pathname` 推斷；**推不出來就停下問人，不要預設 slots**。
+
+🔴 **一個 umbrella 只放一個分類。** 三種分類的**分母單位不同**（電子＝1 款遊戲、真人＝1 張桌台、捕魚＝1 個場次/款）、**就緒判準不同**（電子看網路靜默＋畫面靜止；真人/捕魚看畫面**在動**）、**逾時不同**（90/150/120s）。混在一份報告裡算出來的 OK 率沒有對應的母體，只能誤導。要合看就人工並列兩份報告。
 
 ## 起手（所有 mode 共用）
 瀏覽器由 AI 啟動（`browser_navigate` 到 `about:blank`）；**視窗大小/所在螢幕、導航到站點、登入，一律由使用者自己做**。AI 從當前頁接手，同站內切分類/品牌可代勞（先宣告）。**跨站導航與登入永不代勞。**
@@ -33,7 +37,8 @@ description: 跨品牌「遊戲載入冒煙檢查」—— 逐款點開，確認
 
 不在目標站 / 未登入 / 多站分頁分不清 → **停下請使用者處理**。
 
-產 `umbrella_dir` = `reports/smoke-launch-<YYYYMMDD-HHMM>/`（時間戳用 Bash `date +%Y%m%d-%H%M`），內含 `_scratch/`、`_scripts/`、`brands/`。寫 `smoke-meta.json`：站點 host、viewport、`login_verified` 與佐證、起始時間、參數、`method_version`。
+產 `umbrella_dir` = `reports/smoke-launch-<category>-<YYYYMMDD-HHMM>/`（時間戳用 Bash `date +%Y%m%d-%H%M`），內含 `_scratch/`、`_scripts/`、`brands/`。
+寫 `smoke-meta.json`：站點 host、`category_key`（`slots|live|fishing`，機器讀）與 `category`（人讀）、`ready_profile`、viewport、`login_verified` 與佐證、起始時間、參數、`method_version`、`sibling_runs`（其他分類的 umbrella 絕對路徑，方便互相參照）。
 
 ## Phase 1 — 盤點品牌
 
@@ -41,7 +46,10 @@ description: 跨品牌「遊戲載入冒煙檢查」—— 逐款點開，確認
 
 🔴 **不要寫死任何 URL 形狀**（例如 `?somePlatformId=`）。先點一個 tile 驗當前站是不是這個形狀；不是就記「點 tile」模式與 selector。其他站的觀察只當起手假設。
 
-產 `brands.json`：`[{bslug, display_name, platform_id, lobby_url, tile_selector, enter_mode, phase:"pending", brand_verdict:null}]`。`bslug` 由 AI 產（小寫、去空白），**只存在 reports/**。
+產 `brands.json`：`[{bslug, category, display_name, platform_id, lobby_url, tile_selector, enter_mode, listed_count, phase:"pending", brand_verdict:null}]`。
+
+🔴 **`bslug` 一律帶分類前綴**（`fish-<品牌>`、`live-<品牌>`；電子沿用無前綴以相容既有產物）。原因：同一供應商常同時供多個分類、**platform_id 完全相同**，不加前綴的話兩個分類的同名品牌會寫進同一個 `brands/<bslug>/games.jsonl`，接著 `report_common.dedupe_retries()`（只用 `idx` 當鍵）會把「A 分類第 3 款」和「B 分類第 3 款」當成重試補行、**靜默丟棄前一筆**，而報告只會顯示「收尾重試取代的舊紀錄 N 行」—— 看起來完全正常。這是唯一一種**壞了不會有任何訊號**的失敗。
+`category` 另外存成獨立欄位（給報告分段用），**不要靠解析 bslug 字串**。`bslug` 由 AI 產（小寫、去空白），**只存在 reports/**。
 
 **回報品牌名單與數量給使用者。**
 
@@ -55,11 +63,11 @@ description: 跨品牌「遊戲載入冒煙檢查」—— 逐款點開，確認
 
 ## Phase 3 — 逐款開啟
 
-派 `game-launch-runner`，**12 款/批、序列執行**（單一瀏覽器分頁不能並行搶操作）。判定階梯與 status 詞彙見 agent 檔，編排層不要另訂一套。
+派 `game-launch-runner`，**序列執行**（單一瀏覽器分頁不能並行搶操作）。批量依型態：**slots 12 / fishing 8 / live 3 款一批**（真人單桌可能 2–3 分鐘，一批就是一個品牌）。判定階梯與 status 詞彙見 agent 檔，編排層不要另訂一套。
 
 進度回報：**每批一行**（約 5 分鐘一次），每品牌結束一段摘要。不做逐款回報（會淹沒對話）。
 
-**早退規則**：某品牌前 10 款全部 `LAUNCH_BLOCKED` 且**警告文案相同** → 高信心判定整品牌未開通，回報並提議跳過剩餘款（省下大量無謂時間）。跳過的款標 `SKIPPED` 並在報告註明原因。
+**早退規則**：某品牌前 **min(10, max(3, ceil(清單數 × 0.3)))** 款全部 `LAUNCH_BLOCKED` 且**警告文案相同** → 高信心判定整品牌未開通，回報並提議跳過剩餘款。（寫成比例式是因為真人品牌的桌台數常 < 10，固定「前 10 款」永遠不會觸發。）跳過的款標 `SKIPPED` 並在報告註明原因。
 
 **停損（任一命中就停下問人）**：
 - 連續 3 款 `STUCK_RECOVERED`（疑瀏覽器/session 掛了）
@@ -113,6 +121,13 @@ canonical 真源是每品牌的 `games.jsonl`（append-only）；`progress.jsonl
 - **截圖 `filename` 一律完整絕對路徑**（裸檔名 hook 硬擋）；所有產物歸位 `report_dir/`。
 - **卡住 60s 換新分頁**從 lobby 重啟，標 `STUCK_RECOVERED`，不在原頁 debug。
 - **不編造資料**：探不到就記 `gaps`、沒量過的欄位留空，不要填 0 冒充量過。
+
+## 型態別要多留意的（真人／捕魚）
+- 🔴 **真人只驗到「影像出來」不等於「這張桌可以玩」**：串流品質、荷官是否真在發牌（可能是循環錄影）、桌台是否接受下注、限紅是否套到本帳號 —— 全部未驗。
+- 🔴 **真人的桌台可入座性一律未驗證**（安全附則禁止入座）。「需入座才出影像」的桌記 `main_check="seat_required"`，那是**未量測**，既不代表壞也不代表可用。
+- 🔴 **真人桌台數的分母常是未知的**（二層大廳在跨域 iframe 內列舉不到）→ `full-game-list.json` 標 `unenumerable`，報告印「—」。
+- 🔴 **捕魚的獨立錢包未驗證**：常有獨立遊戲錢包需先轉帳。不讀餘額就**分不出**「錢包沒錢／錢包沒開通／品牌沒開通」，三者可能表現成同一個彈窗。
+- **真人桌台清單是動態的**（會即時開關），「捲到底數量不變」的 lazy-load 檢查不成立，盤到的數字是當下快照。
 
 ## 這個方法測不到什麼（必須原文進報告）
 1. 🔴 **「動畫跑但餘額凍結」會被記成 `LAUNCH_OK`** —— 前端載入完整但後端未部署，本方法完全偵測不到。

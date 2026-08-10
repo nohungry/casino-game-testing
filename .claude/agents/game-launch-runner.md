@@ -24,6 +24,25 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 沙箱限制（前人踩過）：腳本檔**必須放在 repo 根以內**（`/tmp` 會被擋）；沙箱內**沒有 `require`、沒有動態 `import`**，跨呼叫傳參可用頁面 `localStorage`（用完 `removeItem` 清掉）。
 
+## 🔴 型態別附則（`probe.ready.profile` 決定，讀階梯之前先讀這節）
+
+安全邊界必須在你讀到任何操作指令之前就建立 —— 理由與「警告判定要排在就緒判定前面」同構。
+
+### `profile == "live"`（真人桌台）
+電子的「不碰投注 UI」是**避開一顆按鈕**；真人是**避開整個畫面** —— 桌台約 60% 是下注區，且下注窗口會自動循環（約 43s 一輪，見 `game-batch-runner.md` 的型態別 playbook），soft/hard deadline **必然跨過至少一個窗口**。以下沒有例外，不接受「為了拿到判定」的權衡：
+
+1. **觀察模式**：進桌後只截圖、不互動。判定期間**所有滑鼠座標必須落在 surface rect 之外**，或根本不發生 mouse 事件（glance 截圖不需要滑鼠）。
+2. **不入座**：「入座／坐下／Take a seat／空位／Join」一律不點。若該桌需入座才出畫面 → **不得**記成就緒；記 `LAUNCH_TIMEOUT` + `main_check="seat_required"` + note「需入座才出影像，依安全附則未入座」，並在品牌 `gaps` 記「該桌可入座性未驗證」。🔴 **不要為了讓數字好看而入座。**
+3. **不點籌碼、不碰下注區**：籌碼列、下注格、確認／重複／加倍、Auto、快速下注、限紅切換一律不點。真人預設籌碼常 **>20**（`test-game-brand/SKILL.md` 的「單注 >20 先請示」紅線），誤觸一次就越線。
+4. **禁鍵盤**：`profile==live` 時**不得呼叫 `browser_press_key`**（部分桌台空白鍵＝快速下注、Enter＝確認）。要關母頁彈窗只用該彈窗按鈕的座標點擊。批次開頭自述「本批不使用鍵盤」。
+5. **下注窗口不是動作訊號**：倒數、其他玩家下注、開牌都與本任務無關，一律不回應。🔴 **若不慎產生任何下注（餘額被扣／出現「已下注／Bet placed」）→ 立即停止整批、截圖、回報使用者，不得自行取消或補救。**
+6. **判定完立刻離桌**，不多等一秒。**單桌駐留硬上限 180s**（含退出）。留在桌台的每一秒都是誤觸與被動參與的曝險。
+7. **截圖含荷官人臉與其他玩家暱稱／下注額**：沿用「只有非 `LAUNCH_OK` 才留存證」；glance **只寫固定覆寫路徑**，不要比照電子那樣在 `_scratch/` 留一堆 `<brand>-g<N>.png`（對電子只是磁碟成本，對真人是留存他人生物特徵）。必須存證時 clip 只取牌桌區，避開下方玩家列與聊天。**報告不得內嵌真人截圖，只放路徑。**
+8. **不改任何桌台設定**（語言、畫質、視角、音量、多視窗）。
+
+### `profile == "fishing"`（捕魚）
+🔴 **捕魚的開火＝下注**，而開火動作就是「在 canvas 上按住滑鼠」。因此**判定期間禁止任何落在 canvas rect 內的 mouse down / click / drag**。canvas 全螢幕時，退出只走 canvas 外的站方 UI 或 `page.reload()`，**不准在 canvas 上找「返回」鈕點**。
+
 ## 每款的判定階梯
 
 ```
@@ -44,20 +63,30 @@ Gate B 有警告嗎（🔴 必須在就緒判定之前）
      (3) launch API 回非 2xx 或 body 帶 error    → block_kind=api_error
    命中 → 存證截圖 → LAUNCH_BLOCKED（block_text 記**逐字原文**）→ 關掉彈窗
 
-Gate C 就緒了嗎（soft deadline 30s）
-   ready = surface 存在（iframe rect 兩軸皆 ≥ probe.ready.min_surface_ratio × viewport，
-                          或新分頁 load 完成）
-         AND 網路靜默 probe.ready.quiet_ms（預設 3000ms 無新請求）
-         AND iframe src 不再是 probe.ready.loader_marker
-   ready → glance 截圖一張 → 目視分類：
-     遊戲美術 / START / TAP TO PLAY / 點擊繼續 → LAUNCH_OK, reached=splash
-     已是可操作主畫面                          → LAUNCH_OK, reached=main
-     進度條 / 百分比 / 空白                     → 回 Gate C 繼續等
-     彈窗或錯誤文字（畫在 canvas 上）           → LAUNCH_BLOCKED, block_kind=visual_only
+Gate C 就緒了嗎（soft deadline 依 profile：slots 30s / fishing 40s / live 45s）
+   surface 成立 = 依 probe.ready.surface_kinds 依序判：
+       新分頁 → newtab
+       新 iframe 兩軸 ≥ min_surface_ratio × viewport → iframe
+       <canvas> 新出現或長到 ≥ min_surface_ratio × viewport 兩軸 → canvas
+       document.fullscreenElement 非 null，或大廳文字指紋掉到 <30% 且有全螢幕元素 → samepage
+
+   ready 的第二個條件依 profile 分歧：
+     slots          → 網路靜默 probe.ready.quiet_ms（預設 3000ms）且 src 不再是 loader_marker
+     live / fishing → 🔴 反過來：content_ok AND motion_ok，連續兩輪成立
+         content_ok：裁 surface rect ∩ viewport → 64×64 灰階 → std ≥ 15 且 darkFrac < 0.92
+         motion_ok ：5 幀 × 600ms，相鄰幀平均絕對差 ≥ 1.0 的間隔佔 ≥ 3/4
+
+   ready → glance 截圖一張 → 目視分類（詞彙依 profile）：
+     slots  ：遊戲美術/START/點擊繼續 → reached=splash；可操作主畫面 → reached=main
+     live   ：桌台影像（荷官或牌桌可見且在動）→ reached=table_live
+              多張桌台縮圖的網格                → reached=table_lobby（🔴 不是就緒，見下）
+              靜態底圖＋轉圈 / 黑畫面           → 回 Gate C 繼續等
+     fishing：魚群或砲台可見 → reached=scene；載入條/百分比 → 回 Gate C 繼續等
+     任一 profile：彈窗或錯誤文字（畫在 canvas 上）→ LAUNCH_BLOCKED, block_kind=visual_only
 
 Gate D 逾時
-   hard deadline = probe.ready.hard_timeout_ms（預設 90s）
-   surface 在但永不靜默 / 恆停 loader → 存證截圖 → LAUNCH_TIMEOUT
+   hard deadline = probe.ready.hard_timeout_ms（slots 90s / fishing 120s / live 150s）
+   surface 在但始終不符就緒條件 → 存證截圖 → LAUNCH_TIMEOUT
 
 Stuck
    任一 MCP 呼叫本身 60s 無回應 → 開新分頁 navigate 到 lobby_url → STUCK_RECOVERED
@@ -67,9 +96,13 @@ Stuck
    settle probe.exit.wait_after_ms，確認回到大廳（無遊戲 surface、卡片可點）再跑下一款。
 ```
 
-### 兩個判準的理由（別自作主張簡化）
-- **載入中與否看網路，不看畫面。** 跨域 iframe 內的轉圈圈讀不到，「連續 N 秒無新請求」才是通用訊號。但**光靠靜默不夠** —— 載入失敗的白畫面也是靜默的，所以 glance 是必要的第二道。
+### 三個判準的理由（別自作主張簡化）
+- 🔴 **「載入中與否看網路靜默」只對會停止拉資源的型態成立（slots）。**
+  真人（HLS/DASH 每 2–6s 拉 segment、WebSocket 心跳、WebRTC）與捕魚（常駐連線）**永遠不會靜默**，硬套只會整批走到 hard deadline 記 `LAUNCH_TIMEOUT`。
+  反過來，這兩種型態的「**畫面靜止**」是**失敗訊號**（凍幀／斷線／poster 卡住），不是就緒訊號 —— 所以 live/fishing 用 `motion_ok`（畫面在動）判就緒。
+  無論哪種 profile，**glance 目視都是必要的第二道**：載入失敗的白畫面也是靜默的、也可能是靜止的。
 - **警告判定必須排在就緒判定前面。** 有的品牌是「遊戲載完後才蓋一層維護中」，先判就緒會直接吃到假 `LAUNCH_OK`。
+- 🔴 **真人的二層大廳（選桌台）不算就緒。** 那一層是站方或供應商自己渲染的、幾乎必然成功，而且它符合「載入完成、可操作、是一個大 iframe」的所有特徵 —— 不明文禁止就一定會被寫成 `reached=main` 而且看起來完全合理，等於整個品牌都記成可進但一張桌都沒進過。到二層大廳只能記 `reached=table_lobby`，**除非任務明確指定「到選桌大廳即可」，否則不得據此標 `LAUNCH_OK`**。
 
 ## status（只准用這幾個）
 
@@ -81,7 +114,15 @@ Stuck
 | `LAUNCH_NO_RESPONSE` | 點了（含重點 1 次）完全沒反應 |
 | `STUCK_RECOVERED` | 卡住後開新分頁復原，該款未取得結論 |
 
-**不要新造狀態。** 需要細分就用欄位：`reached`(`splash`/`main`/`unknown`)、`block_text`（逐字）、`block_kind`(`native_dialog`/`parent_modal`/`api_error`/`visual_only`)、`launch_ms`、`surface`(`iframe`/`newtab`)。
+**不要新造狀態。** 需要細分就用欄位：`block_text`（逐字）、`block_kind`(`native_dialog`/`parent_modal`/`api_error`/`visual_only`)、`surface`(`iframe`/`newtab`/`canvas`/`samepage`)。
+
+`reached` 的允許值**依 profile 而定**，🔴 **live/fishing 一律禁用 `main`**（那是電子語意「載入條跑完可操作」，真人的二層大廳會誤套）：
+
+| profile | reached 允許值 | 可標 `LAUNCH_OK` 的層級 |
+|---|---|---|
+| slots | `splash` / `main` | `splash` 起 |
+| live | `table_lobby` / `table_live` | 預設只有 `table_live`；任務明確指定「到選桌大廳即可」時 `table_lobby` 亦可，**但要在 note 註明依此裁示** |
+| fishing | `loading` / `scene` | 只有 `scene` |
 
 ## 截圖
 - **只有非 `LAUNCH_OK` 的款才留存證**：`<brand_dir>/screenshots/g<idx>-<status>.png`（完整絕對路徑）。
@@ -90,10 +131,14 @@ Stuck
 
 ## 每款 append 一行到 `<brand_dir>/games.jsonl`
 ```json
-{"idx":1,"id":"g001","code":"…","name":"…","status":"LAUNCH_OK","reached":"splash",
- "surface":"iframe","launch_ms":8400,"block_kind":null,"block_text":null,
+{"idx":1,"id":"g001","code":"…","name":"…","status":"LAUNCH_OK",
+ "reached":"splash","reached_splash_ms":8400,"reached_main_ms":19300,"main_check":"reached",
+ "surface":"iframe","block_kind":null,"block_text":null,
+ "api_status":200,"api_error_code":null,
  "opened_at":"2026-01-01 00:00:00","screenshots":[],"note":""}
 ```
+`main_check` 允許值：`reached`（已進主畫面／桌台影像已出）、`timeout`、`start_gate`（資源載完但停在遊戲自帶「開始」鈕前，**不要點那顆鈕**）、`seat_required`（真人需入座才出影像，依安全附則未入座）、`not_checked`。
+🔴 **欄名要與這裡一致**：報告端是照欄名讀的，自己另創 `launch_ms`/`ready_ms` 之類的變體會讓該欄在報告裡變成空白，而且不會有任何錯誤訊息。
 時間一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'` 取，不要自己編）。
 🔴 **不要寫 `before_bal`/`after_bal`/`delta`/`bet`/`win` 這些欄位** —— 你沒量過，留空比填 0 誠實（填 0 會讓下游誤以為量過且結果是 0）。
 

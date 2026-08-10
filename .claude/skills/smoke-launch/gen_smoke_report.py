@@ -88,11 +88,15 @@ def brand_verdict(counts, meta_verdict, listed=0):
     if not tested:
         return "未測"
     ok = counts.get("LAUNCH_OK", 0)
-    partial = listed and tested < listed
+    # 🔴 listed 為 None＝清單列舉不到（例如跨域 iframe 內的二層大廳）。
+    #    這種情況一律標「抽樣」且分母寫「未知」—— None 是 falsy，若沿用 `partial = listed and ...`
+    #    會落到 else 分支輸出「全數可載入」，等於用 3 張桌的結果宣稱整個品牌都好。
+    denom = "未知" if listed is None else listed
+    partial = (listed is None) or (listed and tested < listed)
     if ok == tested:
-        return f"抽樣全數可載入（{tested}/{listed}）" if partial else "全數可載入"
+        return f"抽樣全數可載入（{tested}/{denom}）" if partial else "全數可載入"
     if ok == 0:
-        return f"抽樣全數未能載入（{tested}/{listed}）" if partial else "全數未能載入"
+        return f"抽樣全數未能載入（{tested}/{denom}）" if partial else "全數未能載入"
     return f"抽樣部分可載入（{ok}/{tested}）" if partial else "部分可載入"
 
 
@@ -112,10 +116,18 @@ def collect(umbrella):
         games, n_superseded = dedupe_retries(normalize_games(load_jsonl(gpath)))
         games.sort(key=lambda g: (g.get("idx") is None, g.get("idx")))
 
-        # 分母優先序：該品牌的 full-game-list.json ＞ 盤點階段記的 listed_count ＞ 已跑行數
-        listed = len((load_json(os.path.join(bdir, "full-game-list.json"), {}) or {}).get("games") or [])
-        if not listed:
-            listed = bmeta.get("listed_count") or 0
+        # 分母優先序：full-game-list.json ＞ 盤點階段的 listed_count ＞ 未知
+        # 🔴 清單標了 unenumerable（例如真人的二層大廳在跨域 iframe 內無法列舉）→ listed=None，
+        #    絕不可 fallback 成「已跑行數」：那會讓「抽 3 張桌」印成「清單 3 / 覆蓋率 100%」。
+        # 🔴 「確認過是 0 張」與「不知道有幾張」是兩件事，不可都用 falsy 兜成同一個值：
+        #    前者印 0（是量測結果），後者印 —（是未量測）。
+        fgl = load_json(os.path.join(bdir, "full-game-list.json"), {}) or {}
+        if fgl.get("unenumerable"):
+            listed = None
+        elif fgl.get("games"):
+            listed = len(fgl["games"])
+        else:
+            listed = bmeta.get("listed_count")      # 缺鍵才是 None＝未知；記了 0 就是 0
         probe = load_json(os.path.join(bdir, "brand-probe.json"), {}) or {}
 
         counts = {}
@@ -130,7 +142,8 @@ def collect(umbrella):
         brands.append({
             "bslug": bslug,
             "name": bmeta.get("display_name") or bslug,
-            "listed": listed or len(games),
+            "listed": listed,          # 可能是 None＝未知，下游印「—」，不要用 `or len(games)` 兜
+            "category": bmeta.get("category") or "?",
             "tested": n_tested(counts),
             "skipped": counts.get("SKIPPED", 0),
             "counts": counts,
@@ -151,17 +164,19 @@ def collect(umbrella):
                    or {}).get("games") or [])
         brands.append({
             "bslug": slug, "name": bmeta.get("display_name") or slug,
-            "listed": fgl or bmeta.get("listed_count") or 0,
+            "listed": fgl if fgl else bmeta.get("listed_count"),   # 同上：0 是量測結果，None 才是未知
+            "category": bmeta.get("category") or "?",
             "tested": 0, "skipped": 0, "counts": {}, "superseded": 0,
             "verdict": bmeta.get("brand_verdict") or "未測",
             "confidence": None, "gaps": [], "probe": {},
         })
-    brands.sort(key=lambda b: b["name"])
+    brands.sort(key=lambda b: (b["category"], b["name"]))
     return rows, brands
 
 
 def build_md(umbrella, rows, brands, meta):
-    tot_listed = sum(b["listed"] for b in brands)
+    tot_listed = sum(b["listed"] or 0 for b in brands)          # None＝未知，不計入
+    n_unknown = sum(1 for b in brands if b["listed"] is None)   # 有幾個品牌分母未知
     tot_tested = sum(b["tested"] for b in brands)      # 不含 SKIPPED
     tot_skipped = sum(b["skipped"] for b in brands)
     agg = {}
@@ -181,7 +196,8 @@ def build_md(umbrella, rows, brands, meta):
                  ("開始", meta.get("started_at")), ("結束", meta.get("ended_at")),
                  ("viewport", meta.get("viewport")), ("登入態已驗證", meta.get("login_verified")),
                  ("方法版本", meta.get("method_version")), ("resume 次數", meta.get("resume_count")),
-                 ("涵蓋品牌數", len(brands)), ("清單總款數", tot_listed),
+                 ("涵蓋品牌數", len(brands)),
+                 ("清單總款數", f"{tot_listed}" + (f"（另有 {n_unknown} 個品牌分母未知）" if n_unknown else "")),
                  ("已測款數（不含 SKIPPED）", tot_tested), ("未測（SKIPPED）", tot_skipped)]:
         L.append(f"| {k} | {cell(v)} |")
     L.append("")
@@ -198,7 +214,8 @@ def build_md(umbrella, rows, brands, meta):
         L.append(f"| `SKIPPED`（未測，不計入已測） | {tot_skipped} | — |")
     L.append("")
     L.append(f"**可載入（`LAUNCH_OK`）：{n_ok} / {tot_tested} 款**"
-             f"（佔已測 {pct(n_ok, tot_tested)}；佔清單總數 {pct(n_ok, tot_listed)}）"
+             f"（佔已測 {pct(n_ok, tot_tested)}；佔已知清單總數 {pct(n_ok, tot_listed)}"
+             + ("，另有分母未知的品牌未計入" if n_unknown else "") + "）"
              f" — 僅代表前端載入成功，未驗餘額。\n")
 
     L.append("## 3. 品牌總表\n")
@@ -207,8 +224,10 @@ def build_md(umbrella, rows, brands, meta):
     L.append("|---|---:|---:|" + "---:|" * len(STATUSES) + "---:|---|---|")
     for b in brands:
         cnt = " | ".join(str(b["counts"].get(s, 0)) for s in STATUSES)
-        L.append(f"| {b['name']} | {b['listed']} | {b['tested']} | {cnt} | "
-                 f"{pct(b['tested'], b['listed'])} | {b['verdict']} | {cell(b['confidence'])} |")
+        listed_txt = "—" if b["listed"] is None else str(b["listed"])
+        cov_txt = "—" if b["listed"] is None else pct(b["tested"], b["listed"])
+        L.append(f"| {b['name']} | {listed_txt} | {b['tested']} | {cnt} | "
+                 f"{cov_txt} | {b['verdict']} | {cell(b['confidence'])} |")
     L.append("")
 
     ok_rows = [r for r in rows if r.get("status") == "LAUNCH_OK"]
@@ -227,7 +246,11 @@ def build_md(umbrella, rows, brands, meta):
             elif chk == "timeout":
                 main_txt = "⏱ 逾時未達"
             elif chk == "start_gate":
-                main_txt = "⏸ 停在開始鈕"
+                # 電子是「開始」鈕、捕魚是遊戲自帶的「選場」畫面 —— 同一件事：
+                # 資源載完了，但還要再點一次遊戲內的東西才會進主畫面，而那一點可能等同下注。
+                main_txt = "⏸ 停在遊戲自帶入口（未點）"
+            elif chk == "seat_required":
+                main_txt = "🚫 需入座（未驗證）"
             elif chk in (None, "not_checked"):
                 main_txt = "未驗證"
             else:
@@ -243,10 +266,11 @@ def build_md(umbrella, rows, brands, meta):
         L.append(f"\n小計：載入到 splash **{len(ok_rows)} 款**；其中確認進到可操作主畫面 **{n_main} 款**、"
                  f"停在遊戲自帶「開始」鈕前 {n_gate} 款、等到逾時仍未進主畫面 {n_to} 款、未做主畫面驗證 {n_nc} 款。")
         if n_gate:
-            L.append("\n> ⏸ **「停在開始鈕」不是失敗**：資源已載完、畫面靜止、網路已靜默，只是該引擎需要再點一次"
-                     "遊戲自帶的「開始」才會進主畫面。**本輪未點該鈕** —— 專案鐵則禁止碰投注 UI，"
-                     "而部分引擎的「開始」可能等同旋轉（＝下注）。這些款的主畫面可達性**尚未驗證**，"
-                     "需要另行裁示後才能確認。")
+            L.append("\n> ⏸ **「停在遊戲自帶入口」不是失敗**：資源已完整載入，只是該引擎還需要再點一次"
+                     "**遊戲畫面內**的東西才會進主畫面（電子是「開始」鈕、捕魚是選場／選注額房間）。"
+                     "**本輪未點** —— 專案鐵則禁止碰投注 UI，而那一點可能等同下注"
+                     "（電子部分引擎的「開始」＝旋轉；捕魚進房後畫面任一點擊＝開火）。"
+                     "這些款的主畫面可達性**尚未驗證**，需要另行裁示後才能確認。")
     else:
         L.append("_無_")
     L.append("")
@@ -281,13 +305,17 @@ def build_md(umbrella, rows, brands, meta):
     if not any_bad:
         L.append("_無_\n")
 
-    bad_brands = [b for b in brands if b["tested"] == 0 or b["verdict"] in ("BRAND_UNAVAILABLE", "PROBE_FAILED")]
+    # 🔴 用 startswith：實際寫入的值帶括號原因（例如 "BRAND_UNAVAILABLE(list: 0 張卡片)"），
+    #    精確比對從來不會 match；BRAND_LOBBY_ONLY 有 tested 行，不改就會整個漏出本節。
+    bad_brands = [b for b in brands if b["tested"] == 0
+                  or str(b["verdict"]).startswith(("BRAND_UNAVAILABLE", "PROBE_FAILED", "BRAND_LOBBY_ONLY"))]
     L.append("## 6. 品牌層級不可用 / 未探測成功\n")
     if bad_brands:
         L.append("| 品牌 | 判讀 | 清單款數 | 未探到的項目 |")
         L.append("|---|---|---:|---|")
         for b in bad_brands:
-            L.append(f"| {b['name']} | {b['verdict']} | {b['listed']} | {cell('、'.join(b['gaps']) if b['gaps'] else None)} |")
+            L.append(f"| {b['name']} | {b['verdict']} | {'—' if b['listed'] is None else b['listed']} | "
+                     f"{cell('、'.join(b['gaps']) if b['gaps'] else None)} |")
     else:
         L.append("_無_")
     L.append("")
@@ -345,7 +373,8 @@ def main():
         f.write(md)
 
     out = {"out_md": md_path, "brands": len(brands), "tested": len(rows),
-           "by_status": {}, "listed": sum(b["listed"] for b in brands)}
+           "by_status": {}, "listed": sum(b["listed"] or 0 for b in brands),
+           "listed_unknown_brands": sum(1 for b in brands if b["listed"] is None)}
     for r in rows:
         st = r.get("status") or "?"
         out["by_status"][st] = out["by_status"].get(st, 0) + 1
