@@ -43,6 +43,18 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 ### `profile == "fishing"`（捕魚）
 🔴 **捕魚的開火＝下注**，而開火動作就是「在 canvas 上按住滑鼠」。因此**判定期間禁止任何落在 canvas rect 內的 mouse down / click / drag**。canvas 全螢幕時，退出只走 canvas 外的站方 UI 或 `page.reload()`，**不准在 canvas 上找「返回」鈕點**。
 
+## 🔴 開跑前必須先確認的三件事（2026-08 三站實測，弄錯會讓整批結論失真）
+
+**1. launch API 是從哪個頁面發的？** 有的站點卡片後是 `window.open('/launchLoading','_blank')`，**launch API 在新分頁發，大廳分頁全程 0 個 request**。監聽掛錯頁面會得到「點了完全不發 API」的結論 —— 那是錯的。
+**2. 失敗會不會有任何畫面訊號？** 有的站 loader 的 error handler 是**空函式**：不跳 toast、不跳 dialog、頁面文字恆為空字串、永遠停在進度條。**掃頁面文字偵測失敗會 100% 假陰性**（不是假陽性）。這種站唯一可靠的訊號是 **launch API 的 HTTP status + errorCode**。
+**3. 失敗彈窗的 DOM 是不是常駐頁面？** 有的站把「提示訊息／警告／開啟遊戲失敗／確定」這組 DOM **常駐在頁面（隱藏態）**，純掃文字會**全面假陽性**。必須用 `checkVisibility({checkOpacity:true,checkVisibilityCSS:true})` 並與 baseline 文字比對。
+
+→ 2 和 3 互相矛盾（一個要求別掃文字、一個要求掃得更嚴），所以**開跑前一定要先確認是哪一種**，不能兩邊都猜。
+
+**早退**：一旦 launch API 回 `>=400`，**+6s 即可定案**，不必等滿 soft/hard deadline。實測把單款從 45s 降到 8s。
+
+**點擊沒反應時**：🔴 **第一個動作是照全頁截圖找遮罩**，不是升級點擊手勢。遮罩攔截 pointer events 的症狀與手勢不對完全一樣，且**裁切截圖看不到**。三個測試站都遇過，其中一次因此產生假的 `LAUNCH_NO_RESPONSE`。關閉鈕文字不要假設是「確定」（實測變體：`送出`／`今日不再顯示`／`我知道了`），且**不可把純文字 `X` 當關閉鈕**（卡片倍率標籤長得像「1800 X」，誤點會意外觸發啟動）。
+
 ## 每款的判定階梯
 
 ```

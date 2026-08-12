@@ -46,6 +46,20 @@ description: 跨品牌「遊戲載入冒煙檢查」—— 逐款點開，確認
 
 🔴 **不要寫死任何 URL 形狀**（例如 `?somePlatformId=`）。先點一個 tile 驗當前站是不是這個形狀；不是就記「點 tile」模式與 selector。其他站的觀察只當起手假設。
 
+### Phase 1.5 —（可選但強烈建議）用 API 預篩上游可用性
+
+品牌數多時（>15），逐品牌開 UI 冒煙很貴（一站 40 分鐘）。可以先直接呼叫 launch API 篩掉根本開不起來的品牌，只對有回 `gameUrl` 的走 UI。2026-08-12 實測用此法把 27 個平台的篩選從 40 分鐘壓到 3 分鐘。
+
+🔴 **三個前提缺一不可，我在同一天把三個都踩過一次：**
+
+1. **端點要對** —— UI 走的可能是 `launchGameBySeamless` 而不是 `Game/launch`，**兩者結果不同**（實測某站同一品牌在兩支端點結果相反）。先從 network 面板看 UI 實際打哪支。
+2. **間隔 ≥6 秒** —— 平台有 5 秒節流，回 `400 InvalidOperate`「您的操作過於頻繁」。我用 0.5 秒掃，25 個失敗裡有 20 個是自己造成的。
+3. 🔴 **掃完要收錢** —— **自動轉移 ON 時，呼叫 launch API 會把主錢包整筆搬進供應商錢包，即使根本沒進遊戲**。實測掃完主錢包被歸零，害下一批看到「遊戲內餘額 0」而我一度誤判成平台缺陷。**掃站前後都要讀主錢包餘額**，掃完用「一鍵轉回／全部轉回」收回。
+
+另外：**自組 API 請求前，先從 network 面板抄該站真實送出的 header**（`authorization`／`companycode`／`lang`／**`domain`**）。`domain` 常與頁面網址不同（實測過某站的 `domain` 比頁面網址多了一段後綴），填錯**不會報錯，而是安靜回一組看起來合理但全錯的資料**。
+
+⚠️ **API 只能用來「排除」，不能用來「確認」** —— API 回得出 gameUrl 不代表 UI 開得起來（實測有品牌 API 通但 UI 轉點失敗）。可用的品牌仍要走 UI 實測。
+
 產 `brands.json`：`[{bslug, category, display_name, platform_id, lobby_url, tile_selector, enter_mode, listed_count, phase:"pending", brand_verdict:null}]`。
 
 🔴 **`bslug` 一律帶分類前綴**（`fish-<品牌>`、`live-<品牌>`；電子沿用無前綴以相容既有產物）。原因：同一供應商常同時供多個分類、**platform_id 完全相同**，不加前綴的話兩個分類的同名品牌會寫進同一個 `brands/<bslug>/games.jsonl`，接著 `report_common.dedupe_retries()`（只用 `idx` 當鍵）會把「A 分類第 3 款」和「B 分類第 3 款」當成重試補行、**靜默丟棄前一筆**，而報告只會顯示「收尾重試取代的舊紀錄 N 行」—— 看起來完全正常。這是唯一一種**壞了不會有任何訊號**的失敗。
