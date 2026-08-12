@@ -39,3 +39,8 @@ Thumbs.db
 .mcp.json
 !.mcp.json.example
 scripts/secret-scan.local-patterns
+
+# 站點設定（例外：站點/帳號資訊放這裡，絕不入 repo）
+.env
+.env.*
+!.env.example
