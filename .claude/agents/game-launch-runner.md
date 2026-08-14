@@ -53,6 +53,13 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 **早退**：一旦 launch API 回 `>=400`，**+6s 即可定案**，不必等滿 soft/hard deadline。實測把單款從 45s 降到 8s。
 
+🔴 **大廳側的點擊一律用元素定位，不要用固定座標。** `locator(...).click()` 會自己把元素捲進視窗；
+固定座標的前提「該元素還在原位」在**批次跑完之後幾乎必然不成立**（頁面停在很深的捲動位置）。
+非用座標不可時，先 `scrollIntoViewIfNeeded()` → 重讀 `getBoundingClientRect()` → 用 `document.elementFromPoint(x,y)`
+**確認命中目標且 y 在 viewport 內** → 才點；不符就 abort。
+2026-08-14 實測：照探測記錄的座標點下去，因為頁面已捲到 `scrollY=1745`，**落到遊戲卡片上誤開了一款遊戲**
+（該元素實際 rect 是 `y=-531`）。這種誤點不會報錯，它「成功」了，只是做了完全不同的事。
+
 **點擊沒反應時**：🔴 **第一個動作是照全頁截圖找遮罩**，不是升級點擊手勢。遮罩攔截 pointer events 的症狀與手勢不對完全一樣，且**裁切截圖看不到**。三個測試站都遇過，其中一次因此產生假的 `LAUNCH_NO_RESPONSE`。關閉鈕文字不要假設是「確定」（實測變體：`送出`／`今日不再顯示`／`我知道了`），且**不可把純文字 `X` 當關閉鈕**（卡片倍率標籤長得像「1800 X」，誤點會意外觸發啟動）。
 
 ## 每款的判定階梯
@@ -75,6 +82,16 @@ Gate B 有警告嗎（🔴 必須在就緒判定之前）
      (3) launch API 回非 2xx 或 body 帶 error    → block_kind=api_error
    命中 → 存證截圖 → LAUNCH_BLOCKED（block_text 記**逐字原文**）→ 關掉彈窗
 
+🔴 **(2) 必須用 baseline diff，不能裸關鍵字掃全頁。**
+點擊前先記下 baseline 命中集合，**只有 baseline 沒有的新命中才算 block**。
+原因：站方側欄常有常駐選單項用到同樣的字（實測「**固定維護時間**」是個永遠可見的正常連結），
+裸關鍵字 `維護` 會 100% 假陽性 —— 而誤判成 BLOCKED 會讓報告說「這個品牌沒開通」，
+方向與事實相反，比漏判更糟，因為它會被當成站方的問題回報出去。
+關鍵字表要收窄到明確的失敗語句（例：`開啟遊戲失敗`／`請稍後再嘗試`／`維護中`／`遊戲維護`／`暫停服務`／`系統忙碌`），
+**拿掉裸 `維護` 與裸 `警告`**。
+連帶：「開跑前清殘留彈窗」的觸發條件要**綁死明確語句**（如 `開啟遊戲失敗`），
+不能命中任一關鍵字就去點「確定」，否則會盲點到頁面上其他的確定鈕。
+
 Gate C 就緒了嗎（soft deadline 依 profile：slots 30s / fishing 40s / live 45s）
    surface 成立 = 依 probe.ready.surface_kinds 依序判：
        新分頁 → newtab
@@ -84,6 +101,7 @@ Gate C 就緒了嗎（soft deadline 依 profile：slots 30s / fishing 40s / live
 
    ready 的第二個條件依 profile 分歧：
      slots          → 網路靜默 probe.ready.quiet_ms（預設 3000ms）且 src 不再是 loader_marker
+                      🔴 **靜默只是必要條件，不足以判就緒**（見下方「靜默會提前成立」）
      live / fishing → 🔴 反過來：content_ok AND motion_ok，連續兩輪成立
          content_ok：裁 surface rect ∩ viewport → 64×64 灰階 → std ≥ 15 且 darkFrac < 0.92
          motion_ok ：5 幀 × 600ms，相鄰幀平均絕對差 ≥ 1.0 的間隔佔 ≥ 3/4
@@ -109,6 +127,13 @@ Stuck
 ```
 
 ### 三個判準的理由（別自作主張簡化）
+- 🔴 **靜默會提前成立 —— slots 也不能只看靜默。**
+  實測有款遊戲 8.7s 就達成 3s 網路靜默，但畫面其實還停在「**正在載入資源 [66%]**」的進度條：
+  客戶端在本機解壓／初始化，**不發任何網路請求，所以靜默提前成立**。續等 12s（期間 0 request）才真的進主畫面。
+  → 靜默達成後要再加**第二道**：`post_quiet_grace`（實測 6000ms 夠用，遇到會卡進度條的品牌用 12000ms），
+  或 glance 目視確認（看到「開始」鈕／轉軸／主畫面才算；看到「正在載入資源 [N%]」就續等到 hard deadline）。
+  反方向也要小心：**slots 的 splash 常有循環動畫**（實測某品牌網路靜默後連拍 4 張，位元組數全不同），
+  所以 slots **不可**加「畫面靜止」條件 —— 加了會整個品牌假 timeout。
 - 🔴 **「載入中與否看網路靜默」只對會停止拉資源的型態成立（slots）。**
   真人（HLS/DASH 每 2–6s 拉 segment、WebSocket 心跳、WebRTC）與捕魚（常駐連線）**永遠不會靜默**，硬套只會整批走到 hard deadline 記 `LAUNCH_TIMEOUT`。
   反過來，這兩種型態的「**畫面靜止**」是**失敗訊號**（凍幀／斷線／poster 卡住），不是就緒訊號 —— 所以 live/fishing 用 `motion_ok`（畫面在動）判就緒。

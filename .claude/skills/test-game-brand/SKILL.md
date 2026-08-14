@@ -65,6 +65,20 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 - canary 產生的注單，post 對帳時會多出現在後台 → 列 `extra_in_bo` 並註明「canary」，不是漏帳。
 - 測完關閉 canary 遊戲分頁回大廳，再開始切批。
 
+#### ⚡ 快路徑：用平台 API 讀餘額取代逐輪截圖（**seamless 共用錢包的站才適用**）
+遊戲多半是跨域 iframe／canvas，餘額只能裁切截圖判讀，10 輪下來很貴又容易誤讀。
+若該站是 **seamless 共用錢包**（無獨立遊戲錢包、不需轉帳），可改用站台自己的餘額 API
+（從 network 面板找，通常是 `MemberWallet/getBalance` 之類），在 `browser_evaluate` 裡帶站方真實 header 呼叫。
+2026-08-14 實測：10 輪下注從「逐輪裁切截圖判讀」變成純數值比對，整段只花約 2 分鐘，且 API 多 2 位小數精度。
+
+🔴 **啟用前必須先驗等價性，不可假設**：canary 那一注前後各比一次
+「**API 讀到的餘額 == 遊戲內顯示的餘額**」（實測 API `6874.7335` / 遊戲內 `6874.73`，只差顯示截斷）。
+**兩者不一致就退回截圖判讀** —— 有獨立遊戲錢包的站（手動轉帳或進場自動掃入）**一律不適用**，
+那些站的主錢包是快取，delta 必須以遊戲內餘額為準。
+
+⚠️ 快路徑只換掉「讀餘額」這一件事，**不改變任何判準**：PASS 仍要驗扣款、`delta==0` 仍不准 PASS、
+成立與否的最終閘門仍是後台注單筆數。
+
 ### 6. 切批 + 派發 game-batch-runner
 - 依 `batch.size`（預設 8）把清單切成數批。
 - 對每批，用 **Agent 工具 spawn `game-batch-runner`**（subagent_type: `game-batch-runner`），prompt 帶入：完整 `brand_params`、`lobby_url`、該批 `games`、`report_dir` 絕對路徑、`flags`、**`expected_start_balance`**（上一批回報的結束餘額；首批＝canary 後餘額）——runner 開批第一款讀到的 before 若明顯偏離（>1 個注額），note 記「疑前批晚結算入帳/錢包同步」供對帳留意，不擋跑。
