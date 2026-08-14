@@ -75,10 +75,42 @@ def normalize_games(rows):
                         if canon == "win" and al == "est_win":
                             g["win_est"] = True
                         break
+        _mark_win_est(g)
         for f in _TS_FIELDS:
             if g.get(f):
                 g[f] = norm_ts(g[f])
     return rows
+
+
+def sort_key_idx(g):
+    """安全的 idx 排序鍵：`idx` 明寫成 null 時 `g.get("idx", 0)` 會回 None（default 只在
+    缺鍵時生效），直接 sort 會 TypeError。idx 為 None 的行排最後。"""
+    i = g.get("idx")
+    return (i is None, i if i is not None else 0)
+
+
+def _mark_win_est(g):
+    """推估旗標必須【資料驅動】，不能只靠 alias 觸發。
+
+    🔴 2026-08-14 實測事故：runner 同時把反推值寫進 `win` 與 `est_win`（三款皆如此，
+    值完全相同）。因為 `win` 有值，上面的 alias 分支根本不會執行，`win_est` 永不為 True，
+    於是 delta 反推出來的派彩以【實讀外觀】進了正式交付的報告 —— 報告裡「推估」出現 0 次。
+    這正是 2026-08-08 裁示（推估值可進報告但一律標記）要防的事，而當時報告層零防線。
+
+    改成只要 `est_win` 有值就判斷，不管 `win` 有沒有值：
+      - win 為空（alias 補進來）      → 推估
+      - win == est_win               → runner 雙寫，win 其實是推估值 → 推估
+      - win != est_win               → 語意不明：可能 win 是實讀、est_win 是另外推估的。
+                                       保守起見仍標推估，並記 win_est_conflict 讓人來裁決。
+                                       寧可過度標記，也不要讓推估值冒充實讀。
+    """
+    ew = g.get("est_win")
+    if ew in (None, ""):
+        return
+    w = g.get("win")
+    g["win_est"] = True
+    if w not in (None, "") and w != ew:
+        g["win_est_conflict"] = {"win": w, "est_win": ew}
 
 
 def dedupe_retries(rows):

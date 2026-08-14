@@ -3,7 +3,7 @@
 # 用法：python3 gen_detail_only.py <report_dir> [--out path.html] [--title 標題]
 import argparse, html, json, os, sys
 
-from report_common import load_games, num
+from report_common import sort_key_idx, load_games, num
 
 def esc(x):
     return html.escape("" if x is None else str(x))
@@ -32,7 +32,7 @@ a = ap.parse_args()
 
 rd = a.report_dir.rstrip("/")
 # load_games：壞行容錯 + 欄位別名正規化（兩套 jsonl schema 都吃得下）
-games = sorted(load_games(os.path.join(rd, "games.jsonl")), key=lambda g: g.get("idx", 0))
+games = sorted(load_games(os.path.join(rd, "games.jsonl")), key=sort_key_idx)
 out = a.out or os.path.join(rd, "detail-only.html")
 
 # 站點/品牌/帳號一律「從資料帶入」，腳本本身不寫死任何具體值（站點無預設、帳號無預設）。

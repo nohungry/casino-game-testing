@@ -137,6 +137,10 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
   `delta + bet` 反推，**一律寫進 `est_win` 欄（不要寫 `win`）**，並在 `note` 註明「推估」。
   報告端只認欄名：`est_win` 才會自動標「（推估）」，寫成 `win` 會讓推估值在明細表中
   與實測值外觀完全相同（2026-08-08 裁示：推估值可進報告但一律要標記）。整批都推估就整批寫 `est_win`。
+  ⚠️ **`win` 與 `est_win` 兩邊都寫也不行** —— 2026-08-14 實測就是這樣翻車的：三款都同時寫了兩欄且值相同，
+  報告層的旗標當時只在「`win` 為空、靠 alias 從 `est_win` 補值」時才觸發，於是推估值以實讀外觀進了正式交付的報告
+  （該份報告全文「推估」出現 0 次）。報告層已改成資料驅動判斷（`est_win` 有值就標），
+  但**這不是讓 runner 可以亂寫的理由**：兩欄都寫會被記成 `win_est_conflict`，仍需人工裁決。
 - `betid`：**後台格式**的注單單號，通常由 post 對帳（`backoffice-reconciler`）釘回，run 時留 null 即可；「玩完即對帳」流程當場拿到後台注單號也可直接記。⚠️ 遊戲內的「票面ID」與後台注單號**不是同一個**，別把票面 ID 填進來（會壞對帳），要記就放 `note`。
 - `bo_gamename`（選填）：後台「詳情」彈窗讀到的遊戲名，由 post 對帳釘回；run 時留 null。
 - `before_read_time` / `spin_time` / `after_read_time`：格式一律 `YYYY-MM-DD HH:MM:SS`（Bash `date '+%Y-%m-%d %H:%M:%S'`，與後台 `betTime` 同格式/同時區，供對帳精準對時）；三者時間遞增。`spin_time` 要貼近 SPIN 點擊瞬間。
@@ -144,10 +148,38 @@ tools: mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp
 
 status 合法值：`PASS` / `SPIN_NO_DELTA` / `BET_NOT_PLACED` / `BAL_UNREADABLE` / `OOPS_UNRECOVERED` / `LOAD_FAIL` / `STUCK_RECOVERED` / `DRY_RUN`。（`BET_NOT_PLACED`＝下注鈕點了但未確認成立，連重試都沒成功；不可標 PASS。）`note` 放任何異常細節（讀餘額用了哪段、重試幾次、卡在哪、`delta≈win-bet` 不符等）。dry_run 時 `win`/三個時間可留 null。
 
+### 🔴 多輪的 schema 規範（每款 N 輪 —— 日常任務的預設形狀）
+
+日常任務是「每站每分類 **10 輪**」，不是「每款 1 注」。多輪紀錄**必須**帶下列欄位，否則
+「今天到底下滿幾注」在所有報告上都看不出來（2026-08-14 實測：某款 10 次操作只有 9 次成立，
+報告 KPI 仍是乾淨的「總款數 3 · PASS 3 · 異常 0」，**缺的那一注完全不可見**）。
+
+| 欄位 | 意義 |
+|---|---|
+| `rounds_attempted` | **嘗試**的輪數（＝目標輪數，例如 10） |
+| `rounds_count` | **實際成立**的輪數（後台查得到注單的） |
+| `bet_per_round` | 單輪注額（捕魚用 `bet_per_shot`）。🔴 **>20 紅線判準看這個，不是 `bet`** |
+| `bet` | 該款**總投注** ＝ `rounds_count × bet_per_round`。多輪時 `bet` 絕不是單注 |
+| `rounds[]` | 逐輪明細陣列，見下 |
+
+`rounds[]` 每個元素：
+```json
+{"n":1,"sn":null,"before_bal":6876.33,"after_bal":6874.73,"delta":-1.60,"bet":1.60,
+ "est_win":0,"debit_confirmed":true,"bet_placed":true,
+ "spin_time":"2026-08-14 14:52:04","note":""}
+```
+- `bet_placed`：該輪是否成立。**未成立的輪 `bet` 填 0、`sn` 留 null**，並在 `note` 寫為什麼判定未成立。
+- `sn`：該輪的後台注單號，post 對帳釘回。
+- 🔴 **`rounds_count` 必須等於 `bet_placed==true` 的數量**，不可直接填目標輪數充數。
+
+**status 補充值**（多輪情境）：`PASS_PARTIAL`（部分輪成立，例如 9/10）、
+`PASS_WITH_ANOMALY`（全成立但有需人工看的異常）、`PASS_PENDING_BO`（餘額驗過但尚未對帳確認筆數）。
+🔴 **`rounds_count < rounds_attempted` 時不可標純 `PASS`** —— 那會讓當天缺注在 KPI 上消失。
+
 ### 非拉霸型態的 schema 規範
 🔴 **新型態一律優先寫 canonical 欄**（`bet`/`win`/`before_bal`/`after_bal`/`spin_time`…），型態專屬欄**另加**、**不要重新命名既有欄**（`balance_before`、`spin_at` 這類變體只是徒增報告端 alias 負擔）。時間一律 `YYYY-MM-DD HH:MM:SS`。型態專屬欄：
 
-- **捕魚（連續投注）**：`bet` 填該款總投注（＝發數×砲倍）；另記 `bet_per_shot`（單發砲倍，**>20 紅線判準看這個**）、`shots`（發數）、`fire_start_at`/`fire_end_at`（開火起迄，`spin_time` 填 `fire_start_at` 的值）。`win` 若無法實讀、只能由 delta 反推，填推估值並在 `note` 註明「推估」（報告端會標記，不冒充實讀）。
+- **捕魚（連續投注）**：`bet` 填該款總投注（＝發數×砲倍）；另記 `bet_per_shot`（單發砲倍，**>20 紅線判準看這個**）、`shots`（發數）、`fire_start_at`/`fire_end_at`（開火起迄，`spin_time` 填 `fire_start_at` 的值）。`win` 若無法實讀、只能由 delta 反推，🔴 **一律寫進 `est_win` 欄、`win` 留空**（與上面第 137-139 行同一條規則），並在 `note` 註明「推估」。**不要把推估值寫進 `win`，也不要 `win` 與 `est_win` 兩邊都寫**。
 - **crash / keno 等**：同回合多注時 `bet` 填合計，單注細節記 `note`。
 
 ## 型態別 playbook（下注動作與驗證語意依型態而異，骨架與鐵則不變）

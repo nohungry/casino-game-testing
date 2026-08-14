@@ -76,15 +76,49 @@ def n_tested(counts):
     return sum(v for k, v in counts.items() if k != "SKIPPED")
 
 
+def _listed_from(fgl, bmeta):
+    """決定該品牌的清單分母：非空 list ＞ 有正面證據的 0 ＞ 盤點 listed_count ＞ 未知(None)。
+
+    🔴 空 list 是【歧義】的，不可直接當成「量測到 0 款」：
+    實測 live umbrella 六個品牌的 full-game-list.json 都是 `{"games": []}`、
+    `unenumerable` 未設、`count` 為 None —— scout 其實是**沒列舉成功**（二層大廳在跨域
+    iframe 內抓不到），只是寫了個空陣列。把它讀成「確認 0 張桌」會憑空生出假精確的分母，
+    覆蓋率也會跟著失真。要當成 0，必須有生產端的正面證據（`count` 是數字，或 `enumerated`
+    為真）；否則退回 listed_count，仍缺就是未知。
+    """
+    if fgl.get("unenumerable"):
+        return None
+    games = fgl.get("games")
+    if isinstance(games, list) and games:
+        return len(games)
+    if isinstance(games, list) and not games:
+        if isinstance(fgl.get("count"), int) or fgl.get("enumerated") is True:
+            return 0                      # 生產端明說列舉過 → 0 是量測結果
+        return bmeta.get("listed_count")  # 歧義 → 不假設，退回盤點值（可能是 None＝未知）
+    return bmeta.get("listed_count")
+
+
 def brand_verdict(counts, meta_verdict, listed=0):
     """品牌層級判讀。meta_verdict（brands.json 記的）優先，它涵蓋『根本沒跑成』的情形。
 
     🔴 覆蓋率不足 100% 時措辭一律標明「抽樣」：只驗了 5/243 卻寫「全數未能載入」
     會讓人以為 243 款都驗過，是最容易被誤引用的一句話。
     """
-    if meta_verdict:
-        return meta_verdict
     tested = n_tested(counts)
+    if meta_verdict:
+        # 🔴 meta_verdict 不可直接原文照印 —— 那會讓下面整段「抽樣」措辭被旁路掉。
+        #    實測：brands.json 記 LAUNCHABLE、實際只測 10/30，報告就印出光禿禿的
+        #    「LAUNCHABLE」，讀者無從得知那是抽樣結論。新流程幾乎每個品牌都帶
+        #    meta_verdict，等於這道防線在主路徑上完全沒生效。
+        #    → meta_verdict 仍是判讀來源，但覆蓋率不足時一律加註分母。
+        if tested and listed and tested < listed:
+            return f"{meta_verdict}（抽樣 {tested}/{listed}）"
+        if tested and listed is None:
+            return f"{meta_verdict}（抽樣 {tested}/未知）"
+        if not tested:
+            # 純 API 預篩、UI 一次都沒點過 —— 必須讓讀者看得出來
+            return f"{meta_verdict}（未經 UI 實測）"
+        return meta_verdict
     if not tested:
         return "未測"
     ok = counts.get("LAUNCH_OK", 0)
@@ -122,12 +156,7 @@ def collect(umbrella):
         # 🔴 「確認過是 0 張」與「不知道有幾張」是兩件事，不可都用 falsy 兜成同一個值：
         #    前者印 0（是量測結果），後者印 —（是未量測）。
         fgl = load_json(os.path.join(bdir, "full-game-list.json"), {}) or {}
-        if fgl.get("unenumerable"):
-            listed = None
-        elif fgl.get("games"):
-            listed = len(fgl["games"])
-        else:
-            listed = bmeta.get("listed_count")      # 缺鍵才是 None＝未知；記了 0 就是 0
+        listed = _listed_from(fgl, bmeta)
         probe = load_json(os.path.join(bdir, "brand-probe.json"), {}) or {}
 
         counts = {}
@@ -160,14 +189,17 @@ def collect(umbrella):
         if slug in seen:
             continue
         # 還沒跑的品牌也要進表：分母取盤點階段的 listed_count 或已產的 full-game-list.json
-        fgl = len((load_json(os.path.join(umbrella, "brands", slug, "full-game-list.json"), {})
-                   or {}).get("games") or [])
+        _fj = load_json(os.path.join(umbrella, "brands", slug, "full-game-list.json"), {}) or {}
+        _listed = _listed_from(_fj, bmeta)   # 與上面同一套判準，見 _listed_from 的說明
         brands.append({
             "bslug": slug, "name": bmeta.get("display_name") or slug,
-            "listed": fgl if fgl else bmeta.get("listed_count"),   # 同上：0 是量測結果，None 才是未知
+            "listed": _listed,
             "category": bmeta.get("category") or "?",
             "tested": 0, "skipped": 0, "counts": {}, "superseded": 0,
-            "verdict": bmeta.get("brand_verdict") or "未測",
+            # 這一批是「一款都沒跑過」的品牌（例如只做了 API 預篩）。判讀一律附註出處，
+            # 否則純 API 的結論會與 UI 實測的結論在同一欄裡長得一模一樣。
+            "verdict": (f"{bmeta['brand_verdict']}（未經 UI 實測）"
+                        if bmeta.get("brand_verdict") else "未測"),
             "confidence": None, "gaps": [], "probe": {},
         })
     brands.sort(key=lambda b: (b["category"], b["name"]))
@@ -243,6 +275,11 @@ def build_md(umbrella, rows, brands, meta):
             chk = r.get("main_check")
             if isinstance(mn, (int, float)):
                 main_txt = f"✅ {mn/1000:.0f}s"
+            elif chk == "reached":
+                # 🔴 到了主畫面但沒記耗時（runner 常見：真人看到荷官影像、電子自動跳過 splash）。
+                #    少了這個分支會掉到下面的 cell(chk) 印出生字串「reached」，
+                #    而且小計會把它算進「未做主畫面驗證」—— 方向與事實相反（2026-08-14 實測 3 筆）。
+                main_txt = "✅ 已達（未記耗時）"
             elif chk == "timeout":
                 main_txt = "⏱ 逾時未達"
             elif chk == "start_gate":
@@ -259,7 +296,10 @@ def build_md(umbrella, rows, brands, meta):
                      f"{cell(r.get('name'))} | "
                      f"{f'{sp/1000:.1f}s' if isinstance(sp, (int, float)) else '—'} | "
                      f"{main_txt} | {cell(r.get('surface'))} | {cell(r.get('opened_at'))} |")
-        n_main = sum(1 for r in ok_rows if isinstance(r.get("reached_main_ms"), (int, float)))
+        # 「已達主畫面」＝有記耗時 或 main_check 明寫 reached（後者是 runner 常見寫法）
+        n_main = sum(1 for r in ok_rows
+                     if isinstance(r.get("reached_main_ms"), (int, float))
+                     or r.get("main_check") == "reached")
         n_to = sum(1 for r in ok_rows if r.get("main_check") == "timeout")
         n_gate = sum(1 for r in ok_rows if r.get("main_check") == "start_gate")
         n_nc = len(ok_rows) - n_main - n_to - n_gate
@@ -372,7 +412,12 @@ def main():
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
 
-    out = {"out_md": md_path, "brands": len(brands), "tested": len(rows),
+    # 🔴 `tested` 的定義必須與報告正文一致（不含 SKIPPED）。編排層 agent 讀的是這個 JSON，
+    #    用 len(rows) 會把「排定但沒跑」的款算進已測，轉述出去就成了虛報的覆蓋率。
+    out = {"out_md": md_path, "brands": len(brands),
+           "tested": sum(b["tested"] for b in brands),
+           "skipped": sum(b["skipped"] for b in brands),
+           "rows": len(rows),
            "by_status": {}, "listed": sum(b["listed"] or 0 for b in brands),
            "listed_unknown_brands": sum(1 for b in brands if b["listed"] is None)}
     for r in rows:

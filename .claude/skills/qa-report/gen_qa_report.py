@@ -14,7 +14,7 @@ gen_qa_report.py — QA Manager HTML 報告產生器（確定性、site-agnostic
 import argparse, json, os, re, sys
 from collections import Counter
 
-from report_common import MINUS, betid_str, esc, load_games, money, num, signed
+from report_common import sort_key_idx, MINUS, betid_str, esc, load_games, money, num, signed
 
 
 # ---------- 工具 ----------
@@ -137,7 +137,7 @@ def main():
     if not os.path.exists(games_path):
         sys.exit(f"ERROR: 找不到 {games_path}（請先跑 run）")
     # 載入 + 欄位正規化（report_common：壞行容錯、別名補 canonical 欄）
-    games = sorted(load_games(games_path), key=lambda g: g.get("idx", 0))
+    games = sorted(load_games(games_path), key=sort_key_idx)
     meta = load_json(os.path.join(rd, "run-meta.json"), {}) or {}
     glist_raw = load_json(os.path.join(rd, "full-game-list.json"), {}) or {}
     glist = (glist_raw.get("games") if isinstance(glist_raw, dict) else glist_raw) or []
@@ -254,9 +254,17 @@ def main():
                 f'<td class="note">{esc(g.get("note") or "")}</td>'
                 "</tr>")
         sub_bits = " · ".join(esc(b) for b in (host, account, date_s, time_range, reviewer) if b)
+        # 🔴 輪數達成是日常任務（每站每類 N 輪）的驗收指標。沒有這一格，
+        # 「10 次操作只有 9 次成立」在 KPI 上完全不可見（2026-08-14 實測）。
+        r_got = sum(g["rounds_count"] for g in games if isinstance(g.get("rounds_count"), int))
+        r_want = sum(g["rounds_attempted"] for g in games if isinstance(g.get("rounds_attempted"), int))
         kpis = [
             ("總款數", str(total), ""),
             ("PASS", f"{npass}/{total}", "pos" if sok else ""),
+        ]
+        if r_want:
+            kpis.append(("輪數達成", f"{r_got}/{r_want}", "pos" if r_got >= r_want else "neg"))
+        kpis += [
             ("異常", str(abnormal), "neg" if abnormal else "pos"),
             ("投注合計", money(total_bet), ""),
             ("淨輸贏 delta", signed(net) if num(net) else "—",
@@ -351,8 +359,16 @@ def main():
 
     # ---- 區塊：metrics ----
     pct = f"<small>/{total}</small>"
+    # 🔴 輪數達成：日常任務是「每站每類 N 輪」，缺注必須在 KPI 上看得見。
+    rc_got = sum(g["rounds_count"] for g in games if isinstance(g.get("rounds_count"), int))
+    rc_want = sum(g["rounds_attempted"] for g in games if isinstance(g.get("rounds_attempted"), int))
     metrics = [
         ("ok" if all_pass else "warn", f"{npass}{pct}", "測試款數 · PASS"),
+    ]
+    if rc_want:
+        metrics.append(("ok" if rc_got >= rc_want else "neg",
+                        f"{rc_got}<small>/{rc_want}</small>", "輪數達成 · 實際成立注數"))
+    metrics += [
         ("ok" if nbreak == 0 else "neg", str(nbreak), "餘額鏈斷點 · 逐筆相接"),
         ("", str(nshots), "證據截圖張數"),
         ("", str(wins), "觀察到中獎款"),
