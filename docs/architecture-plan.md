@@ -103,12 +103,15 @@ flowchart TD
 │   │   ├── test-game-brand/SKILL.md
 │   │   ├── qa-report/                     # SKILL.md + gen_qa_report.py + report_common.py
 │   │   │                                  #   + gen_detail_only.py + qa-report-template.html
+│   │   ├── smoke-launch/                  # SKILL.md + gen_smoke_report.py
 │   │   └── git-commit/SKILL.md
-│   └── agents/                            # 四個 subagent
+│   └── agents/                            # 六個 subagent
 │       ├── game-batch-runner.md
 │       ├── brand-calibrator.md
 │       ├── backoffice-reconciler.md
-│       └── qa-report-writer.md
+│       ├── qa-report-writer.md
+│       ├── game-launch-scout.md          # smoke-launch 用
+│       └── game-launch-runner.md         # smoke-launch 用
 ├── hooks/pre-commit                        # git hook（呼叫 secret-scan；core.hooksPath=hooks）
 ├── scripts/
 │   ├── secret-scan.sh                      # 進版前敏感掃描
@@ -141,7 +144,7 @@ flowchart TD
 
 擴充 flag：`--range a-b`、`--resume-from g042`、`--dry-run`。
 
-### 四個 Subagent
+### 六個 Subagent
 
 **1. `game-batch-runner`** — 批次執行 8-10 款。
 
@@ -167,6 +170,11 @@ locate img[alt=name].nth(n)  → load (load_timeout_ms)
 **3. `backoffice-reconciler`** — 從**當前已開好的後台 bet-report 頁**讀資料（不導航、不篩選 — 使用者已準備好）。翻頁抓 snapshot → 比對 `games.jsonl`（配對優先序 `betid` 精準 join ＞ `code`/slug ＞ 名稱/語義 ＞ 時間窗最後手段）→ 釘回注單號 → 產 `reconcile.md`（含 missing_in_bo / extra_in_bo 兩張表）。
 
 **4. `qa-report-writer`** — 讀一次 run 的 report_dir，草擬 QA Manager 裁決/建議寫 `qa-report-input.json`，跑 `gen_qa_report.py`（`--variant full|simple`）產單檔 HTML 報告。數字一律由腳本算，AI 只寫敘述。由 `/qa-report` skill 派發。
+
+
+**5. `game-launch-scout`**（`/smoke-launch` 用）— 對單一品牌用前 1–2 款探出清單抓法、卡片點法、啟動方式、就緒訊號、退出步驟 → `brand-probe.json` + `full-game-list.json`。**不下注、不讀餘額、不碰投注 UI。**
+
+**6. `game-launch-runner`**（`/smoke-launch` 用）— 逐款點開判定能否載入到 start/splash，每款 append 一行 `games.jsonl`。三條不可違反：①不下注不讀餘額 ②**絕不使用 `PASS`**（成功叫 `LAUNCH_OK`）③不導航不登入不換品牌。另有真人安全附則（不入座、禁鍵盤、單桌駐留上限）。
 
 ### Brand config schema（`brands/_schema.yaml`，是文件、不是真資料）
 

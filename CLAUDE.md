@@ -4,7 +4,7 @@
 細節文件：使用說明見 [`README.md`](README.md)，完整架構見 [`docs/architecture-plan.md`](docs/architecture-plan.md)。
 
 ## 這個專案是什麼
-第三方電子遊戲平台的**批次測試自動化**：Skill `/test-game-brand`（calibrate 探參數 / run 批次跑+驗餘額 / post 對帳）+ Skill `/qa-report`（產 HTML 報告，`--simple` 精簡版）+ 四個 subagent（game-batch-runner、brand-calibrator、backoffice-reconciler、qa-report-writer）。
+第三方電子遊戲平台的**批次測試自動化**：Skill `/test-game-brand`（calibrate 探參數 / run 批次跑+驗餘額 / post 對帳）+ Skill `/qa-report`（產 HTML 報告，`--simple` 精簡版）+ Skill `/smoke-launch`（跨品牌載入冒煙，不下注故不產生 PASS）+ **六個 subagent**（game-batch-runner、brand-calibrator、backoffice-reconciler、qa-report-writer、game-launch-scout、game-launch-runner）。
 
 ## 核心不變量（不可違反）
 - **品牌無預設、站點無預設** — **repo 不 track** 任何品牌參數、帳號、網址、憑證。它們都在**本機 gitignored 檔**：品牌參數在 `brands/<brand>.yaml`（calibrate 產出），站點參數與帳密在 `.env`（範本 `.env.example`）。防線是 `.gitignore` ＋ pre-commit 的 secret-scan ＋ 本機敏感詞表 —— 三道都不要繞過。
@@ -12,10 +12,11 @@
 
   | 情況 | 導航 | 登入 |
   |---|---|---|
-  | **站點在 `.env` 白名單內且有憑證** | ✅ AI 可自行導航（先宣告） | ✅ AI 可用 `SITEn_USER`/`SITEn_PASS` 代填 |
+  | **站點在 `.env` 白名單內且有憑證** | ✅ AI 可自行導航（先宣告） | ✅ 前台用 `SITEn_USER`/`SITEn_PASS`；**後台用 `SITEn_ADMIN_USER`/`SITEn_ADMIN_PASS`** |
   | **其他任何站點** | 🔴 **不代勞**，停下請使用者處理 | 🔴 **絕不代填帳密** |
 
   🔴 **白名單是硬判準**：導航前先比對目標 host 是否出現在 `.env` 的 `SITEn_HOST` / `SITEn_ADMIN`，**不在清單內一律 fail-fast**，不要從歷史紀錄、書籤或使用者隨口提到的網址猜站點。
+  🔴 **前台與後台是兩套憑證，欄位不可混用** —— 前台是會員帳號、後台是代理帳號（看得到整條代理線的注單，敏感得多）。讀錯欄位會登錯地方，不會默默成功。
   🔴 **憑證只進輸入框，不進任何其他地方** —— 不回顯在對話、不寫進報告/`note`/截圖、不寫進 `games.jsonl`。`.env` 只放測試站帳號。
   🔴 **登入後仍要實際驗登入態**（頁面還有「登入」鈕＝未登入）—— 代填成功不等於登入成功，這一步不因自動化而省略。
   🔴 **只有編排層（skill）能導航與登入；六個 subagent 一律不行**（batch-runner／launch-runner／scout／calibrator／reconciler／report-writer 都從編排層準備好的當前頁接手）。這條不因白名單而鬆動 —— 把導航收斂在一處，走錯站時只有一個地方要查。
