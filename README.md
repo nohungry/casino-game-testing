@@ -5,7 +5,7 @@
 兩個核心堅持：
 
 - **品牌無預設** — repo 不存任何品牌參數；每個品牌的 SPIN 座標等由 AI 在 `calibrate` 模式自己探出，寫到本機 `brands/<brand>.yaml`（gitignored）。
-- **站點無預設** — repo 不存帳號/網址；**瀏覽器由 AI 啟動（空白頁），使用者自己調滿版、導航、登入、建議停在該品牌遊戲大廳**（另開好後台投注報表分頁），Skill 從當前頁接手。**Skill 不跨站、不登入**；品牌內選款/進入/退出遊戲由 AI 操作，同站停錯品牌 AI 會宣告後自行切換，做「批次驅動 + 餘額驗證 + 報告產出」。
+- **站點無預設（repo 層）** — repo 不 track 任何帳號/網址；站點參數與憑證放本機 `.env`（gitignored）。**瀏覽器由 AI 啟動**；**`.env` 白名單內的站 AI 可自行導航並登入，白名單外一律由使用者自己做**（建議停在該品牌遊戲大廳、另開好後台投注報表分頁）。品牌內選款/進入/退出遊戲由 AI 操作，同站停錯品牌 AI 會宣告後自行切換，做「批次驅動 + 餘額驗證 + 報告產出」。
 
 ---
 
@@ -177,7 +177,7 @@ bash scripts/secret-scan.sh --all      # 想手動全庫體檢時
 
 ```mermaid
 flowchart TD
-    U["🤖 AI 啟動瀏覽器<br/>👤 你：視窗滿版 · 導航 · 登入 · 停在品牌大廳<br/>(+後台投注報表分頁；Skill 不跨站、不登入)"] --> Q{"首次測此品牌?"}
+    U["🤖 AI 啟動瀏覽器<br/>白名單站：AI 自行導航+登入<br/>👤 白名單外：你導航·登入·停在品牌大廳<br/>(+後台投注報表分頁)"] --> Q{"首次測此品牌?"}
     Q -- "是" --> CAL["/test-game-brand calibrate &lt;brand&gt;<br/>AI 自挑大廳第一款當 sample 探 SPIN座標 · 餘額讀法 · intro · 退出"]
     CAL --> CY[("brands/&lt;brand&gt;.yaml<br/>+ calib-meta.json 校準耗時")]
     Q -- "否（已有參數）" --> RUN["/test-game-brand run &lt;brand&gt;<br/>讀+比對 viewport · 抓清單 · 分批 · 逐款驗餘額"]
