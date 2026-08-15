@@ -207,8 +207,16 @@ QA 上手 5 步：
 
 骨架/MCP/schema/四 subagent/三 mode 於 **2026-06-03** 全數建成；其後多品牌實測驗收全部通過：
 - **calibrate / run / post 皆 live 驗收**：多個第三方品牌（2026-06 Canvas slot 型 247 款重驗全過、slot 型全量 rerun；2026-06-26 異質玩法型全品牌；**2026-07-07 重測 52 款 48 PASS、對帳 48/48 平、詳情 GameName 全掃零配錯**；2026-07-05 再一 slot 型品牌）。逐案期望值見 `docs/acceptance-fixtures.md`。
-- 視窗策略定案「**滿版、不 resize**」（viewport=null + --start-maximized；viewport 只讀+比對），並由 `.claude/settings.json` PreToolUse hook 機器強制（resize / 裸檔名截圖一律 deny）。
+- ~~視窗策略定案「**滿版、不 resize**」（viewport=null + --start-maximized；viewport 只讀+比對）~~ **← 已被下面兩條修訂取代，勿當現況讀**，並由 `.claude/settings.json` PreToolUse hook 機器強制（resize / 裸檔名截圖一律 deny）。
 - **2026-08-08 修訂**：瀏覽器改由 **AI 啟動**（導航與登入仍永不代勞）；`--start-maximized` 拿掉、**滿版與所在螢幕由使用者自己決定**（多螢幕解析度不同，AI 選錯反而卡人）。`viewport=null` 保留，viewport 基準改以 **calibrate 當下讀到的值**為準。
+- **2026-08-15 修訂（現況）**：視窗尺寸改為**兩種模式並存**，因為上一條的理由只在「有人在場」時成立 ——
+  無人值守時沒有人可以調視窗，viewport 不符就 fail-fast、而 `browser_resize` 又被 hook 擋死，等於沒有出口。
+  - **有人在場**（預設）：`playwright-mcp.config.json`，`args: []`，使用者手動調滿版。
+  - **無人值守**：`playwright-mcp.unattended.json`（gitignored，範本為 `.example`），
+    `contextOptions.viewport: {W,H}` —— 在建立 context 當下釘死，不經過 resize，hook 精神不受影響。
+    （**不可改用 `--window-size`**：那是 OS 視窗大小，viewport 會被瀏覽器 UI 吃掉；
+    實測 `--window-size=1920,1080` 的實際 viewport 是 1919×992，做相等比對會每次都 fail。）
+  切換方式：改 `.mcp.json` 的 `--config` 指向哪一份，然後**重啟 Claude Code**（config 是啟動時讀進記憶體的）。
 - 2026-07-07 起：使用者只需停在品牌大廳（品牌內選款/切換由 AI 操作）、run 有 canary 先行與收尾重試、對帳含詳情彈窗遊戲名正面確認、run 產物由 `gen_run_artifacts.py` 確定性產出。
 
 ## Critical Files（現況）

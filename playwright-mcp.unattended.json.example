@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "無人值守模式的瀏覽器設定範本。clone 後：",
+    "  cp playwright-mcp.unattended.json.example playwright-mcp.unattended.json",
+    "  # 把 viewport 改成你那台機器要用的尺寸，並同步寫進 .env 的 WINDOW_SIZE",
+    "  # 再把 .mcp.json 的 --config 指到這一份，重啟 Claude Code",
+    "",
+    "為什麼需要這一份：",
+    "  預設的 playwright-mcp.config.json 是 viewport:null + args:[]，",
+    "  頁面 viewport 跟著真實視窗走，滿版與所在螢幕交給使用者手動決定 ——",
+    "  這在【有人在場】時是對的（多螢幕解析度不同，AI 替使用者選反而卡人）。",
+    "  但【無人值守】時沒有人可以調視窗：瀏覽器開出來是預設小尺寸，",
+    "  viewport 與 calibrate 基準不符 → runner fail-fast → 整晚停在第一步。",
+    "  而 browser_resize 被 hook 硬擋（那是對的，擋的是執行期程式化改動）。",
+    "  → 出口是在【建立 context 的那一刻】就把 viewport 釘死，不經過 resize。",
+    "",
+    "🔴 為什麼是 contextOptions.viewport 而不是 --window-size：",
+    "  --window-size 設的是【OS 視窗】大小，viewport 會被分頁列/網址列吃掉一截。",
+    "  實測 --window-size=1920,1080 + viewport:null → 實際 viewport 是 1919x992",
+    "  （寬少 1px、高少 88px）。拿它跟 .env 的 WINDOW_SIZE 做相等比對會每次都 fail。",
+    "  contextOptions.viewport={1920,1080} → 實際就是 1920x1080，完全相等、跨機器可重現。",
+    "",
+    "🔴 一旦選定就不要再動：座標是 viewport-specific，改尺寸等於作廢所有 brand yaml。",
+    "",
+    "本檔是範本（入 repo）；實際使用的 playwright-mcp.unattended.json 已被 gitignore，",
+    "因為尺寸是每台機器自己的事，不該固定進團隊共用設定。"
+  ],
+  "browser": {
+    "launchOptions": {
+      "args": []
+    },
+    "contextOptions": {
+      "viewport": { "width": 1920, "height": 1080 }
+    }
+  }
+}

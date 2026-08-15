@@ -40,6 +40,10 @@ Thumbs.db
 !.mcp.json.example
 scripts/secret-scan.local-patterns
 
+# 無人值守的視窗尺寸是每台機器自己的解析度，不入 repo
+# 共用範本是 playwright-mcp.unattended.json.example
+playwright-mcp.unattended.json
+
 # 站點設定（例外：站點/帳號資訊放這裡，絕不入 repo）
 .env
 .env.*

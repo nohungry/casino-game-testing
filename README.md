@@ -78,6 +78,26 @@ macOS / Windows / 一般 Linux 桌面通常**不用加** `--executable-path`，�
 > 改完 `.mcp.json` 要**重啟 Claude Code** 才生效。`.mcp.json` 已 gitignore，是各人本機檔，改它不會影響別人。
 > `playwright-mcp.config.json`（視窗設定）**同樣要重啟**：MCP server 在自己啟動時就把 config 讀進記憶體並快取，之後再開瀏覽器都沿用舊值。
 
+#### 視窗尺寸：有人在場 vs 無人值守
+
+| | 用哪份 config | 視窗誰決定 |
+|---|---|---|
+| **有人在場**（預設） | `playwright-mcp.config.json`（`args: []`） | 你自己拉滿版 |
+| **無人值守**（排程跑） | `playwright-mcp.unattended.json` | `contextOptions.viewport: {W,H}` |
+
+無人值守要多做一步：
+```bash
+cp playwright-mcp.unattended.json.example playwright-mcp.unattended.json
+# 把 viewport 改成這台機器要用的尺寸，並同步寫進 .env 的 WINDOW_SIZE
+# 再把 .mcp.json 的 --config 指到這一份 → 重啟 Claude Code
+```
+
+> **為什麼不能直接叫 AI 調視窗**：`browser_resize` 被 hook 一律 deny（座標是 viewport-specific，
+> 執行期改尺寸會讓所有 brand yaml 失效）。無人值守時又沒有人可以手動拉滿版 ——
+> 所以尺寸只能在**建立 context 的那一刻**用 `contextOptions.viewport` 釘死，這不經過 resize，不違反鐵則。
+> （別用 `--window-size`：那是 OS 視窗大小，實測 1920,1080 的實際 viewport 是 1919×992，比對會失敗。）
+> 🔴 選定後就別再動：改尺寸等於作廢所有已校準的座標。
+
 ### 瀏覽器「本來看得到、後來消失」（Linux/WSL 桌面環境）
 跟上面「缺 lib 導致視窗跳不出來」是**不同的問題**：瀏覽器原本開得好好的，放置一段時間（或桌面工作階段中斷、鎖定、休眠後重連）再回來，**視窗不見了但 process 還活著** —— MCP 仍能列分頁、執行 JS，只是畫面不再被繪製出來。
 

@@ -17,10 +17,27 @@ description: 批次測試第三方電子遊戲平台的某個品牌。三個 mod
 先判斷 `<mode>`，照對應段落做。`<brand>` 沒給就先問使用者，不要亂猜。
 
 ## 啟動瀏覽器（AI 負責，所有 mode 共用）
-**瀏覽器由 AI 開；視窗大小/位置、導航、登入由使用者。** 任一 mode 起手先確認瀏覽器在不在：
+**瀏覽器由 AI 開。** 任一 mode 起手先確認瀏覽器在不在：
 1. `browser_tabs list`（或任一 browser 工具）試探；報錯／沒有任何分頁 → 瀏覽器還沒起來。
-2. 用 `browser_navigate` 到 `about:blank` 觸發啟動。config 用 `viewport: null`（頁面 viewport 跟著真實視窗走），**不帶 `--start-maximized`** —— 視窗開多大、放哪台螢幕**由使用者自己決定**（多螢幕環境解析度不同，AI 不替使用者選）。
-3. 啟動後**告訴使用者**：「瀏覽器已開好，請你 (a) 把視窗放到要用的螢幕並調成滿版、(b) 導航到站點並登入、(c) 停在 `<brand>` 大廳（另開後台投注報表分頁）」，然後**等使用者回覆再往下**。
+2. 用 `browser_navigate` 到 `about:blank` 觸發啟動。config 一律 `viewport: null`（頁面 viewport 跟著真實視窗走）。
+
+### 🔴 視窗尺寸有兩種模式，先確認自己在哪一種
+
+用 `browser_evaluate` 讀 `window.innerWidth/innerHeight`，跟 `.env` 的 `WINDOW_SIZE`（若有設）比對：
+
+| 模式 | 設定 | viewport 誰決定 | 起手行為 |
+|---|---|---|---|
+| **有人在場**（預設） | `playwright-mcp.config.json`（`viewport: null`） | **跟著使用者手動調的視窗走** | 停下請使用者調視窗＋導航＋登入，**等回覆再往下** |
+| **無人值守** | `playwright-mcp.unattended.json`（`contextOptions.viewport: {W,H}`） | **建立 context 當下釘死** | 尺寸已確定，**不停等**，直接往下 |
+
+- 有人在場模式：告訴使用者「瀏覽器已開好，請你 (a) 把視窗放到要用的螢幕並調成滿版、(b) 導航到站點並登入、(c) 停在 `<brand>` 大廳（另開後台投注報表分頁）」，然後**等使用者回覆再往下**。多螢幕環境解析度不同，AI 不替使用者選螢幕。
+- 無人值守模式：viewport 在**建立 context 的那一刻**就釘死了，不需要也不可以在執行期調整（`browser_resize` 被 hook 硬擋，那是對的）。讀到的 viewport 與 `.env` 的 `WINDOW_SIZE` 不符 → **fail-fast 回報**（多半是 `.mcp.json` 的 `--config` 沒指到 unattended 那份、或改完沒重啟 Claude Code），**不要自己想辦法喬**。
+
+> 為什麼要兩種：2026-08-08 拿掉 `--start-maximized` 的理由是「多螢幕 AI 選錯反而卡人」—— 這個理由只在**有人在場**時成立。無人值守時沒有人可以調視窗，少了確定性尺寸就會卡在第一步（viewport 不符 → fail-fast），而 resize 又被擋死，等於沒有出口。
+>
+> 🔴 **不要改用 `--window-size`**：那設的是 OS 視窗大小，viewport 會被分頁列/網址列吃掉一截。
+> 實測 `--window-size=1920,1080` + `viewport:null` → 實際 viewport 是 **1919×992**（寬少 1px、高少 88px），
+> 拿它跟 `WINDOW_SIZE` 做相等比對會**每次都 fail**。`contextOptions.viewport` 才是完全相等、跨機器可重現的。
 4. 🔴 **絕不代勞導航到站點、也絕不代填帳密** —— 這條不因「AI 開瀏覽器」而鬆動。使用者沒給網址就等，不要從歷史紀錄/書籤猜站點。
 
 🔴 **viewport 基準以 calibrate 當下讀到的為準**（不是假設滿版）：calibrate 讀 viewport 寫進 yaml，run 時比對，不一致 fail-fast。**座標是 viewport-specific**，所以要提醒使用者：決定螢幕與視窗大小後，整個 calibrate → run 週期**不要搬動視窗或換螢幕**（雙螢幕解析度不同，搬過去座標即失效）。AI 一律不呼叫 `browser_resize`（hook 硬擋）；使用者手動調整視窗不受影響。
