@@ -34,5 +34,33 @@
 - **品牌K run**（拉霸、`balance_before/after` + `spin_at` ISO 時間）：**不帶 `--input`** 跑 `gen_qa_report.py` → 測試時段須顯示 `11:43 – 11:52` 而非 `2026- – 2026-`（ISO 打穿 `_hhmm` 的回歸），執行時長算得出、明細表時間顯示 canonical 格式。
 - **品牌F run**（捕魚、`total_bet`/`bet_per_shot`/`fire_start_at`/`est_win`）：投注/進入前後/SPIN 時間/中獎四欄皆非空；表頭「投注（總額）」、中獎值帶「（推估）」標記；total/PASS/net_delta 與 run-summary 一致（2 款、PASS 2、net −1.4）。
 
+## 無人值守 + 白名單導航登入 + 後台代理憑證（2026-08-19 站點R 實測，三項首次 live 驗收）
+
+`.mcp.json` 的 `--config` 指向 `playwright-mcp.unattended.json` 後重啟，全程無人調整視窗：
+- **viewport**：`about:blank` 讀到 `1908×912`，與 `.env` 的 `WINDOW_SIZE` 及 unattended config 三處一致；
+  `outerWidth/Height` 為 `1916×1043`（OS 視窗含分頁列）——正是不可改用 `--window-size` 的實證。
+- **白名單導航**：目標 host 比對到 `SITEn_HOST` 後自行 `browser_navigate`，登入頁填 `SITEn_USER`/`SITEn_PASS`
+  → 出現「用戶協議」需按確定 → 登入態實測通過（「登入」鈕消失、顯示帳號與餘額、線上人數）。
+- **後台代理憑證**：另開分頁用 `SITEn_ADMIN_USER`/`SITEn_ADMIN_PASS` 登入後台（代理層帳號），
+  停在 bet-report。**前後台兩套憑證分別使用、未混用**，兩邊都一次登入成功。
+- 憑證讀取用「暫時分頁載 `file://` 讀 `.env` → 同一 snippet 內填入 → 只回傳布林狀態」，
+  transcript 全程未出現任何憑證值。
+
+## 狀態三級分類回歸（2026-08-19 修復後實測）
+
+`PASS_PARTIAL` / `PASS_WITH_ANOMALY` / `PASS_PENDING_BO` 不再被算成「異常／假 PASS」：
+- 合成 fixture（PASS / PASS_PARTIAL 9-10 / 缺 `rounds_count` / LOAD_FAIL）→ `pass=1, partial=2, abnormal=1`。
+- 歷史 run 回歸 4 份，其中一份含 1 筆 `PASS_PARTIAL`：修前 `abnormal=1`、修後 `partial=1, abnormal=0`。
+- `gen_run_artifacts._rounds_cell` 在 `rounds_attempted` 有值而 `rounds_count` 缺時，
+  輸出 `🔴 ?/10（成立輪數未記）`，**不再輸出字面 `None/10`**。
+
+## 供應商斷線的正確處置（2026-08-19 站點R 實測）
+
+外部第三方供應商全數 `400 ThirdPartyError`、自營品牌 `200 OK` 時的預期行為：
+- 先跑**對照組**（另一品牌、另一分類）再下結論，不因單品牌失敗就歸咎登入或環境。
+- 進不去的品牌照實記 `LOAD_FAIL` 並產出 run 產物，**不刪除、不當作沒跑過**。
+- 改用可載入的品牌補足該分類時，在 `run-meta.json` 記 `substitute_for` 與 `substitute_reason`。
+- 盤點結果落成 `launch-inventory.json` 附在 report_dir。
+
 ## 參考的歷史脈絡
 品牌H 全量 247 款：**初跑曾 65 款假 PASS（只點 SPIN 不驗餘額，真落單率 72.5%）**；導入「驗餘額才 PASS」鐵則後重驗，247 款全數通過。兩個數字是同一批遊戲**先後兩次**的結果，不矛盾。
