@@ -11,6 +11,13 @@ import sys
 
 MINUS = "−"
 
+# 「餘額已驗、但還有東西要人看」的狀態（game-batch-runner.md 多輪 schema）。
+# 與 LOAD_FAIL / BAL_UNREADABLE 這類真異常語意不同，報告層獨立成一級：
+# 不計入異常，也不算乾淨 PASS。
+# 🔴 舊版各報告器一律 abnormal = total - PASS，把「9/10 成立」算成假 PASS，
+# 反而讓 runner 有動機把部分成立標成純 PASS 來換乾淨 KPI —— 正是多輪 schema 要防的事。
+PARTIAL_STATUSES = ("PASS_PARTIAL", "PASS_WITH_ANOMALY", "PASS_PENDING_BO")
+
 # canonical 欄 ← 別名（依序取第一個有值的）
 ALIAS = {
     "status": ("verdict",),

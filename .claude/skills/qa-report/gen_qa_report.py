@@ -14,7 +14,8 @@ gen_qa_report.py — QA Manager HTML 報告產生器（確定性、site-agnostic
 import argparse, json, os, re, sys
 from collections import Counter
 
-from report_common import sort_key_idx, MINUS, betid_str, esc, load_games, money, num, signed
+from report_common import (PARTIAL_STATUSES, sort_key_idx, MINUS, betid_str, esc,
+                            load_games, money, num, signed)
 
 
 # ---------- 工具 ----------
@@ -151,7 +152,11 @@ def main():
     total = len(games)
     sc = Counter(g.get("status", "?") for g in games)
     npass = sc.get("PASS", 0)
-    abnormal = total - npass
+    # 🔴 舊版 abnormal = total - npass 把 PASS_PARTIAL / PASS_WITH_ANOMALY /
+    # PASS_PENDING_BO 一律算成「異常 / 假 PASS」，反而讓 runner 有動機把 9/10
+    # 標成純 PASS 來換乾淨 KPI —— 正是多輪 schema 要防的事。改三級。
+    npartial = sum(sc.get(s, 0) for s in PARTIAL_STATUSES)
+    abnormal = total - npass - npartial
     deltas = [g["delta"] for g in games if num(g.get("delta"))]
     net = round(sum(deltas), 2) if deltas else None
 
@@ -220,19 +225,24 @@ def main():
     # ---- 精簡核對版（--variant simple）：摘要卡 + 核對結論 + 含注單號明細表 ----
     if a.variant == "simple":
         stitle = nar.get("title_simple") or f"{brand_disp} 功能測試 — 精簡核對版"
-        sok = abnormal == 0 and total > 0
+        sok = abnormal == 0 and npartial == 0 and total > 0
         n_betid = sum(1 for g in games if betid_str(g))
         has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
         wls = [g["bo_winlose"] for g in games if num(g.get("bo_winlose"))]
         wl_total = round(sum(wls), 2) if wls else None
         concl = (nar.get("verdict", {}).get("paragraphs") or [
-            f"共 <b>{total} 款</b>，<b>{npass} 款 PASS</b>、異常 {abnormal} 款；"
+            f"共 <b>{total} 款</b>，<b>{npass} 款 PASS</b>"
+            + (f"、部分成立待確認 {npartial} 款" if npartial else "")
+            + f"、異常 {abnormal} 款；"
             f"每款以遊戲內餘額 before/after 變動驗證真實下注"
             + (f"，其中 {n_betid} 款已記後台注單號可逐筆對單" if n_betid else "") + "。"])[0]
         srows = []
         for g in games:
             st = g.get("status", "?")
-            st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
+            st_cls = ("pass" if st == "PASS"
+                      else "warn" if st in PARTIAL_STATUSES
+                      else "fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED")
+                      else "skip")
             d = g.get("delta")
             d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
             wl = g.get("bo_winlose")
@@ -264,6 +274,8 @@ def main():
         ]
         if r_want:
             kpis.append(("輪數達成", f"{r_got}/{r_want}", "pos" if r_got >= r_want else "neg"))
+        if npartial:
+            kpis.append(("部分成立·待確認", str(npartial), "mid"))
         kpis += [
             ("異常", str(abnormal), "neg" if abnormal else "pos"),
             ("投注合計", money(total_bet), ""),
@@ -275,7 +287,7 @@ def main():
             kpis.append(("後台輸贏合計", signed(wl_total), "neg" if wl_total < 0 else "pos"))
         kpi_html = "".join(f'<span>{esc(k)} <b class="{c}">{v}</b></span>' for k, v, c in kpis)
         css = (
-            ":root{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--head:#1f2d3a}"
+            ":root{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--mid:#8a5a06;--head:#1f2d3a}"
             "*{box-sizing:border-box}"
             'body{margin:0;padding:18px 20px;font:14px/1.5 -apple-system,"Segoe UI","Noto Sans CJK TC",sans-serif;color:#1f2d3a;background:#f4f6f8}'
             "h1{font-size:18px;margin:0 0 4px}"
@@ -296,6 +308,7 @@ def main():
             ".st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}"
             ".st.pass{background:#e2f5ec;color:var(--pos)}.st.fail{background:#fbe5e2;color:var(--neg)}"
             ".st.skip{background:#eef0f2;color:var(--mut)}"
+            ".st.warn{background:#fdf1dc;color:var(--mid)}.mid{color:var(--mid);font-weight:600}"
             "footer{margin-top:12px;color:var(--mut);font-size:12px}")
         doc = (
             '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
@@ -321,7 +334,7 @@ def main():
             f.write(doc)
         print(json.dumps({
             "out": out_path, "variant": "simple", "total": total, "pass": npass,
-            "abnormal": abnormal, "net_delta": net, "total_bet": total_bet,
+            "partial": npartial, "abnormal": abnormal, "net_delta": net, "total_bet": total_bet,
             "betid_rows": n_betid, "bo_winlose_total": wl_total,
         }, ensure_ascii=False))
         return
@@ -336,11 +349,12 @@ def main():
     meta_rows = "".join(f'<div><div class="l">{esc(k)}</div><div class="v">{esc(v)}</div></div>' for k, v in meta_pairs)
 
     # ---- 區塊：verdict ----
-    all_pass = abnormal == 0 and total > 0
+    all_pass = abnormal == 0 and npartial == 0 and total > 0
     chips = nar.get("verdict", {}).get("chips")
     if not chips:
         chips = [f"PASS {npass}/{total}" + (f"（{npass/total*100:.0f}%）" if total else ""),
-                 f"異常款 {abnormal} · 餘額鏈斷點 {nbreak}"]
+                 (f"部分成立待確認 {npartial} · " if npartial else "")
+                 + f"異常款 {abnormal} · 餘額鏈斷點 {nbreak}"]
     chip_cls = "pass" if all_pass else "warn"
     chips_html = (f'<span class="chip {chip_cls}">{esc(chips[0])}</span>' +
                   "".join(f'<span class="chip clean">{esc(c)}</span>' for c in chips[1:]))
@@ -368,6 +382,8 @@ def main():
     if rc_want:
         metrics.append(("ok" if rc_got >= rc_want else "neg",
                         f"{rc_got}<small>/{rc_want}</small>", "輪數達成 · 實際成立注數"))
+    if npartial:
+        metrics.append(("warn", str(npartial), "部分成立 · 待人工確認"))
     metrics += [
         ("ok" if nbreak == 0 else "neg", str(nbreak), "餘額鏈斷點 · 逐筆相接"),
         ("", str(nshots), "證據截圖張數"),
@@ -500,7 +516,7 @@ def main():
     drows = []
     for g in games:
         st = g.get("status", "?")
-        st_cls = "pass" if st == "PASS" else "other"
+        st_cls = "pass" if st == "PASS" else ("warn" if st in PARTIAL_STATUSES else "other")
         d = g.get("delta")
         d_cls = "delta-pos" if (num(d) and d > 0) else "delta-neg"
         w = g.get("win")
@@ -598,7 +614,7 @@ def main():
         f.write(out_html)
 
     print(json.dumps({
-        "out": out_path, "total": total, "pass": npass, "abnormal": abnormal,
+        "out": out_path, "total": total, "pass": npass, "partial": npartial, "abnormal": abnormal,
         "chain_breaks": nbreak, "screenshots": nshots, "wins": wins,
         "net_delta": net, "start_bal": start_bal, "end_bal": end_bal,
         "has_spin_time": has_time, "time_range": time_range,

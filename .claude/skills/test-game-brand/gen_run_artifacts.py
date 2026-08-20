@@ -48,6 +48,10 @@ def _rounds_cell(g):
         return "—"
     if want is None:
         return str(got)
+    # 🔴 目標輪數有值、成立輪數沒記＝「無法驗收」，不是 0 也不是 None。
+    # 舊版直接 f-string 會把字面的 "None/10" 寫進交付給人看的 run-summary。
+    if got is None:
+        return f"🔴 ?/{want}（成立輪數未記）"
     s = f"{got}/{want}"
     return f"🔴 {s}" if isinstance(got, int) and isinstance(want, int) and got < want else s
 

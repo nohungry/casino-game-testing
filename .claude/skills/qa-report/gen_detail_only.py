@@ -3,7 +3,7 @@
 # 用法：python3 gen_detail_only.py <report_dir> [--out path.html] [--title 標題]
 import argparse, html, json, os, sys
 
-from report_common import sort_key_idx, load_games, num
+from report_common import PARTIAL_STATUSES, sort_key_idx, load_games, num
 
 def esc(x):
     return html.escape("" if x is None else str(x))
@@ -68,7 +68,10 @@ def disp_name(g):
 rows = []
 for g in games:
     st = g.get("status") or "?"
-    st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL") else "skip")
+    st_cls = ("pass" if st == "PASS"
+              else "warn" if st in PARTIAL_STATUSES
+              else "fail" if st in ("LOAD_FAIL", "FAIL")
+              else "skip")
     d = g.get("delta")
     d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
     wl = g.get("bo_winlose")
@@ -90,6 +93,8 @@ for g in games:
         "</tr>")
 
 n_pass = sum(1 for g in games if g.get("status") == "PASS")
+n_partial = sum(1 for g in games if g.get("status") in PARTIAL_STATUSES)
+n_partial_kpi = (f'<span>部分成立·待確認 <b class="mid">{n_partial}</b></span>' if n_partial else "")
 # 捕魚等連續投注型態：bet 欄為該款總投注（發數×砲倍），非單注
 bet_is_total = any(num(g.get("total_bet")) for g in games)
 bet_th = "投注（總額）" if bet_is_total else "投注"
@@ -101,7 +106,7 @@ doc = f"""<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(a.title)}{(' — ' + esc(subtitle)) if subtitle else ''}</title>
 <style>
-:root{{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--head:#1f2d3a}}
+:root{{--bd:#d8dde3;--mut:#6b7785;--pos:#0E7A57;--neg:#c0392b;--mid:#8a5a06;--head:#1f2d3a}}
 *{{box-sizing:border-box}}
 body{{margin:0;padding:18px 20px;font:14px/1.5 -apple-system,"Segoe UI","Noto Sans CJK TC",sans-serif;color:#1f2d3a;background:#f4f6f8}}
 h1{{font-size:18px;margin:0 0 4px}}
@@ -124,12 +129,14 @@ tbody tr:nth-child(even){{background:#f7f9fb}}
 .st.pass{{background:#e2f5ec;color:var(--pos)}}
 .st.fail{{background:#fbe5e2;color:var(--neg)}}
 .st.skip{{background:#eef0f2;color:var(--mut)}}
+.st.warn{{background:#fdf1dc;color:var(--mid)}}
+.mid{{color:var(--mid);font-weight:600}}
 </style></head><body>
 <h1>{esc(a.title)}{('　·　' + esc(subtitle)) if subtitle else ''}</h1>
 <div class="sub">逐款下注前後餘額、後台輸贏、SPIN 時間與後台注單號，順序同 idx；可對照後台投注報表逐筆核對。多注單以換行分隔。{esc(bet_note)}</div>
 <div class="kpi">
   <span>總款數 <b>{len(games)}</b></span>
-  <span>PASS <b>{n_pass}</b></span>
+  <span>PASS <b>{n_pass}</b></span>{n_partial_kpi}
   <span>投注額合計 <b>{n_bet:,.2f}</b></span>
   <span>後台輸贏合計 <b class="{ 'pos' if n_wl>0 else 'neg' }">{signed(round(n_wl,2))}</b></span>
 </div>
