@@ -150,7 +150,10 @@ def main():
     # ---- 指標 ----
     total = len(games)
     sc = Counter(g.get("status", "?") for g in games)
-    npass = sc.get("PASS", 0)
+    # 通過的變體（如 PASS_ON_RETEST／PASS_BET_NOT_MINIMUM）一律算通過：它們是「有成立下注」的
+    # 附條件通過，不是異常款。原本只認字串 "PASS"，會把這些款計進「異常款／假 PASS」而誤導。
+    # 明細表仍逐列顯示原始狀態字串，粒度不損失。
+    npass = sum(v for k, v in sc.items() if str(k).startswith("PASS"))
     abnormal = total - npass
     deltas = [g["delta"] for g in games if num(g.get("delta"))]
     net = round(sum(deltas), 2) if deltas else None
@@ -191,7 +194,12 @@ def main():
     brand_disp = meta.get("display_name") or meta.get("brand") or nar.get("brand", "")
     account = meta.get("account", nar.get("account", ""))
     viewport = meta.get("viewport")
-    vp = f"{viewport[0]}×{viewport[1]}" if isinstance(viewport, list) and len(viewport) == 2 else nar.get("viewport", "")
+    if isinstance(viewport, list) and len(viewport) == 2:
+        vp = f"{viewport[0]}×{viewport[1]}"
+    elif isinstance(viewport, str) and viewport.strip():
+        vp = viewport.strip().replace("x", "×")   # run-meta 也可能寫成字串 "1908x912"
+    else:
+        vp = nar.get("viewport", "")
     date_s = nar.get("date", "")
     if not date_s and has_time and re.match(r"^\d{4}-\d{2}-\d{2}", spins[0]):
         date_s = spins[0][:10]
@@ -202,9 +210,13 @@ def main():
             date_s = "-".join(m2.groups())
 
     def _hhmm(ts):
-        """取 HH:MM：完整 datetime 切 [11:16]；純 HH:MM:SS 取前 5 碼。"""
+        """取 HH:MM：完整 datetime 切 [11:16]；純 HH:MM:SS 取前 5 碼。
+
+        日期與時間的分隔可為空格或 ISO 的 'T'（runner 寫的是 ISO，舊版只認空格，
+        會讓時段顯示成 '2026- – 2026-'）。
+        """
         ts = str(ts).strip()
-        return ts[11:16] if re.match(r"^\d{4}-\d{2}-\d{2} ", ts) else ts[:5]
+        return ts[11:16] if re.match(r"^\d{4}-\d{2}-\d{2}[ T]", ts) else ts[:5]
 
     time_range = nar.get("time_range", "")
     if not time_range and has_time:
@@ -227,7 +239,7 @@ def main():
         srows = []
         for g in games:
             st = g.get("status", "?")
-            st_cls = "pass" if st == "PASS" else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
+            st_cls = "pass" if str(st).startswith("PASS") else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
             d = g.get("delta")
             d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
             wl = g.get("bo_winlose")
@@ -477,7 +489,7 @@ def main():
     drows = []
     for g in games:
         st = g.get("status", "?")
-        st_cls = "pass" if st == "PASS" else "other"
+        st_cls = "pass" if str(st).startswith("PASS") else "other"
         d = g.get("delta")
         d_cls = "delta-pos" if (num(d) and d > 0) else "delta-neg"
         drows.append(
@@ -507,7 +519,9 @@ def main():
         '</tr></thead><tbody>' + "".join(drows) + '</tbody></table></div>')
 
     # ---- 區塊：evidence ----
-    shot_types = [
+    # 截圖慣例逐 run 不同（有的每款 4 張、有的每款 1 張），寫死會讓報告高估證據強度。
+    # narrative 可用 evidence_shots: [[檔名樣式, 說明], ...] 指定實際慣例；未給才用舊預設。
+    shot_types = [tuple(x) for x in nar.get("evidence_shots", [])] or [
         ("g{idx}-loaded", "進場過 intro 後的可玩畫面（整頁）"),
         ("g{idx}-bal-before", "SPIN 前餘額區特寫，讀兩次一致"),
         ("g{idx}-spin", "SPIN 後整頁，確認盤面符號重排"),
