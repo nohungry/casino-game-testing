@@ -14,7 +14,8 @@ gen_qa_report.py — QA Manager HTML 報告產生器（確定性、site-agnostic
 import argparse, json, os, re, sys
 from collections import Counter
 
-from report_common import MINUS, betid_str, esc, load_games, money, num, signed
+from report_common import (MINUS, betid_origin, betid_str, bo_wl_of, esc, load_games,
+                           money, num, signed)
 
 
 # ---------- 工具 ----------
@@ -120,6 +121,75 @@ def build_curve_svg(games):
     return {"svg": svg, "start": pts[0], "end": pts[-1], "n": n, "big": big}
 
 
+# ---------- 缺陷登記表 ----------
+# 🔴 這一節的存在理由：報告原本只有「建議與後續」，那是**行動建議**不是**缺陷清單**。
+#    QA 要拿去回報的東西需要：編號／嚴重度／歸屬側／重現／證據指標／狀態。
+#    narrative["defects"] 缺席時整節不輸出（舊 run 不受影響），章節編號由 renumber_sections 動態補。
+_SEV_ORDER = {"P1": 0, "P2": 1, "P3": 2}
+
+
+def _sev_cls(v):
+    v = str(v or "P3").upper()
+    return v if v in _SEV_ORDER else "P3"
+
+
+def build_defects(nar):
+    """回傳 (full 版整節 HTML, simple 版彙總表 HTML)；無 defects 時兩者皆為空字串。"""
+    ds = nar.get("defects") or []
+    if not ds:
+        return "", ""
+    ds = sorted(ds, key=lambda d: (_SEV_ORDER.get(_sev_cls(d.get("sev")), 3), str(d.get("id", ""))))
+
+    # --- 彙總表（兩個版本共用）---
+    sum_rows = "".join(
+        "<tr>"
+        f'<td><span class="chip id">{esc(d.get("id", ""))}</span></td>'
+        f'<td><span class="chip {_sev_cls(d.get("sev")).lower()}">{esc(_sev_cls(d.get("sev")))}</span></td>'
+        f'<td>{esc(d.get("side", ""))}</td>'
+        f'<td>{esc(d.get("title", ""))}</td>'
+        f'<td class="n">{esc(d.get("scope", ""))}</td>'
+        f'<td>{esc(d.get("status", ""))}</td>'
+        "</tr>" for d in ds)
+    sum_tbl = ('<table class="dfx-sum"><thead><tr>'
+               "<th>編號</th><th>嚴重度</th><th>歸屬側</th><th>缺陷</th>"
+               '<th class="n">範圍</th><th>狀態</th>'
+               f"</tr></thead><tbody>{sum_rows}</tbody></table>")
+
+    # --- 逐項卡片（只有 full 版）---
+    fields = (("observed", "現象"), ("repro", "重現"), ("evidence", "證據"),
+              ("control", "決定性對照組"), ("excluded", "我方已排除"), ("note", "備註"))
+    cards = []
+    for d in ds:
+        sev = _sev_cls(d.get("sev"))
+        dl = "".join(f"<dt>{lab}</dt><dd>{d[k]}</dd>" for k, lab in fields if d.get(k))
+        cards.append(
+            f'<div class="dfx s-{sev.lower()}"><div class="dfx-h">'
+            f'<span class="chip id">{esc(d.get("id", ""))}</span>'
+            f'<h4>{esc(d.get("title", ""))}</h4>'
+            f'<span class="chip {sev.lower()}">{esc(sev)}</span>'
+            f'<span class="chip side">{esc(d.get("side", "未分類"))}</span>'
+            + (f'<span class="chip st">{esc(d["status"])}</span>' if d.get("status") else "")
+            + f"</div><dl>{dl}</dl></div>")
+
+    intro = nar.get("defects_note") or ""
+    sec = ('  <section>\n'
+           '    <div class="sec-head"><span class="sec-no">00</span><h2>缺陷清單 — 可直接回報</h2>'
+           '<span class="en">Defect Register</span></div>\n'
+           + (f'    <div class="callout">{intro}</div>\n' if intro else "")
+           + f"    {sum_tbl}\n    " + "".join(cards) + "\n  </section>\n")
+    return sec, sum_tbl
+
+
+def renumber_sections(html):
+    """章節編號在模板裡是寫死的；缺陷節是條件輸出，所以組版後依文件順序重編。"""
+    n = [0]
+
+    def rep(_m):
+        n[0] += 1
+        return f'<span class="sec-no">{n[0]:02d}</span>'
+    return re.sub(r'<span class="sec-no">\d+</span>', rep, html)
+
+
 # ---------- 主流程 ----------
 def main():
     ap = argparse.ArgumentParser()
@@ -147,8 +217,47 @@ def main():
     template = open(tpl_path, encoding="utf-8").read()
     reviewer = a.reviewer or nar.get("reviewer") or "QA"
 
+    # X-131 (4)：`alerts` 兩版**無條件**渲染。發現若只寫在 verdict.paragraphs[1:]，
+    # 簡版只取 [0] 會靜默吃掉它 —— 那是散文紀律，會復發；這裡給它機械保證的位置。
+    alerts = [x for x in (nar.get("alerts") or []) if str(x).strip()]
+    alerts_html = ("".join(f"<li>{x}</li>" for x in alerts)) if alerts else ""
+    defects_sec, defects_tbl = build_defects(nar)
+
+    # X-131 (1)：注單號那句斷言只有在真的有後台注單號時才成立。
+    _orig = [betid_origin(g) for g in games]
+    n_bo_id = sum(1 for o in _orig if o == "bo")
+    n_ingame_id = sum(1 for o in _orig if o == "ingame")
+    if n_bo_id and not n_ingame_id:
+        betid_caption = "注單號＝後台「注單」欄，多注單以逗號分隔"
+    elif n_bo_id and n_ingame_id:
+        betid_caption = (f"注單號：{n_bo_id} 筆為後台「注單」欄（多注單以逗號分隔）；"
+                         f"另 {n_ingame_id} 筆為遊戲端局號／回合 ID，非後台注單欄")
+    elif n_ingame_id:
+        betid_caption = "此欄為遊戲端局號／回合 ID，非後台「注單」欄（本 run 未做後台對帳釘回）"
+    else:
+        # 一列 id 都沒有 ⇒ 該欄全空，原句只是空話而非假陳述。
+        # 保留原文，讓「沒有 id 的 run」在回歸中維持逐位元相同（不為了整齊去動無關的 run）。
+        betid_caption = "注單號＝後台「注單」欄，多注單以逗號分隔"
+    # 只有「純遊戲端 id」的 run 才改導言措辭；其餘一律保留原文，避免波及無關的 run。
+    betid_ingame_only = bool(n_ingame_id and not n_bo_id)
+
     # ---- 指標 ----
+    # 🔴 X-134：`total` 是**執行列數**不是款數。兩者過去被混用（全檔多處把 total 標成「款」），
+    #   在重試少的 run 上剛好相等所以看不出來；qt-20260915-1825 有 56 列重試、全庫 1,572 款，
+    #   而報告顯示「1,307」⇒ 讀者會以為那就是遊戲總數。三個分母必須分開命名。
     total = len(games)
+    lib_total = len(glist)                                   # 全庫款數（full-game-list.json）；缺則 0
+    # 🔴 三態：不是每個 run 都有 `code`（例：rc-slots-20260915-0211 用 game/game_id）。
+    #   欄位缺席時款數是**未知**不是 0 —— 回 None，呼叫端據此隱藏款數指標而不是印出 0。
+    #   （第一版我直接 len(set)，對那個 run 得到 games_distinct=0 / retry=11，是憑空捏造的數字。）
+    _codes = {g.get("code") for g in games if g.get("code")}
+    if _codes:
+        games_distinct = len(_codes)                         # 曾被執行過的款數
+        games_covered = len({g.get("code") for g in games
+                             if g.get("code") and str(g.get("status", "")).startswith("PASS")})
+        n_retry_rows = total - games_distinct                # 重試造成的多餘列數
+    else:
+        games_distinct = games_covered = n_retry_rows = None
     sc = Counter(g.get("status", "?") for g in games)
     # 通過的變體（如 PASS_ON_RETEST／PASS_BET_NOT_MINIMUM）一律算通過：它們是「有成立下注」的
     # 附條件通過，不是異常款。原本只認字串 "PASS"，會把這些款計進「異常款／假 PASS」而誤導。
@@ -230,19 +339,21 @@ def main():
         sok = abnormal == 0 and total > 0
         n_betid = sum(1 for g in games if betid_str(g))
         has_bo_gn = any(g.get("bo_gamename") for g in games)  # 對帳釘回的後台遊戲名（舊 run 無此欄→整欄隱藏）
-        wls = [g["bo_winlose"] for g in games if num(g.get("bo_winlose"))]
+        wls = [v for v in (bo_wl_of(g) for g in games) if num(v)]
         wl_total = round(sum(wls), 2) if wls else None
         concl = (nar.get("verdict", {}).get("paragraphs") or [
-            f"共 <b>{total} 款</b>，<b>{npass} 款 PASS</b>、異常 {abnormal} 款；"
+            f"共 <b>{total} 列</b>"
+            + (f"（{games_distinct} 款）" if games_distinct is not None else "")
+            + f"，<b>{npass} 列 PASS</b>、異常 {abnormal} 列；"
             f"每款以遊戲內餘額 before/after 變動驗證真實下注"
-            + (f"，其中 {n_betid} 款已記後台注單號可逐筆對單" if n_betid else "") + "。"])[0]
+            + (f"，其中 {n_betid} 列已記後台注單號可逐筆對單" if n_betid else "") + "。"])[0]
         srows = []
         for g in games:
             st = g.get("status", "?")
             st_cls = "pass" if str(st).startswith("PASS") else ("fail" if st in ("LOAD_FAIL", "FAIL", "OOPS_UNRECOVERED") else "skip")
             d = g.get("delta")
             d_cls = "pos" if (num(d) and d > 0) else ("neg" if (num(d) and d < 0) else "")
-            wl = g.get("bo_winlose")
+            wl = bo_wl_of(g)
             wl_cls = "pos" if (num(wl) and wl > 0) else ("neg" if (num(wl) and wl < 0) else "")
             srows.append(
                 "<tr>"
@@ -261,14 +372,16 @@ def main():
                 f'<td class="note">{esc(g.get("note") or "")}</td>'
                 "</tr>")
         sub_bits = " · ".join(esc(b) for b in (host, account, date_s, time_range, reviewer) if b)
-        kpis = [
-            ("總款數", str(total), ""),
-            ("PASS", f"{npass}/{total}", "pos" if sok else ""),
+        kpis = ([(("已覆蓋款數" if lib_total else "已 PASS 款數"),
+                   (f"{games_covered}/{lib_total}" if lib_total else str(games_covered)), "")]
+                if games_covered is not None else []) + [
+            ("執行列", (f"{total}（含 {n_retry_rows} 列重試）" if n_retry_rows else str(total)), ""),
+            ("PASS 列", f"{npass}/{total}", "pos" if sok else ""),
             ("異常", str(abnormal), "neg" if abnormal else "pos"),
             ("投注合計", money(total_bet), ""),
             ("淨輸贏 delta", signed(net) if num(net) else "—",
              "neg" if (num(net) and net < 0) else "pos"),
-            ("已記注單號", f"{n_betid} 款", ""),
+            ("已記注單號", f"{n_betid} 列", ""),
         ]
         if wl_total is not None:
             kpis.append(("後台輸贏合計", signed(wl_total), "neg" if wl_total < 0 else "pos"))
@@ -280,7 +393,10 @@ def main():
             "h1{font-size:18px;margin:0 0 4px}"
             ".sub{color:var(--mut);font-size:13px;margin-bottom:10px}"
             ".kpi{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:13px}.kpi b{font-size:15px}"
-            ".concl{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--pos);"
+            + (".alerts{background:#fff8e6;border:1px solid #e3c766;border-left:4px solid #c8860a;"
+               "padding:8px 14px 8px 30px;margin:-6px 0 14px;font-size:13.5px}"
+               ".alerts ul{margin:0;padding-left:4px}.alerts li{margin:2px 0}" if alerts_html else "")
+            + ".concl{background:#fff;border:1px solid var(--bd);border-left:4px solid var(--pos);"
             "padding:10px 14px;margin-bottom:14px;font-size:13.5px}"
             "table{width:100%;border-collapse:collapse;background:#fff;table-layout:auto}"
             "thead th{position:sticky;top:0;background:var(--head);color:#fff;padding:8px 9px;"
@@ -295,7 +411,16 @@ def main():
             ".st{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:600;white-space:nowrap}"
             ".st.pass{background:#e2f5ec;color:var(--pos)}.st.fail{background:#fbe5e2;color:var(--neg)}"
             ".st.skip{background:#eef0f2;color:var(--mut)}"
-            "footer{margin-top:12px;color:var(--mut);font-size:12px}")
+            "footer{margin-top:12px;color:var(--mut);font-size:12px}"
+            # 缺陷彙總表（精簡版自帶樣式，與 full 版模板 CSS 各自獨立）
+            "h2.dfx-t{font-size:15px;margin:18px 0 8px}"
+            ".dfx-sum{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:8px}"
+            ".dfx-sum th,.dfx-sum td{border-bottom:1px solid #e3e6e8;padding:6px 10px;text-align:left}"
+            ".dfx-sum th{color:var(--mut);font-weight:600;font-size:12px}"
+            ".dfx-sum td.n{text-align:right;white-space:nowrap}"
+            ".chip{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap}"
+            ".chip.id{background:#13212B;color:#fff}.chip.p1{background:#fbe5e2;color:var(--neg)}"
+            ".chip.p2{background:#fdf0dc;color:#A8650A}.chip.p3{background:#eef0f2;color:var(--mut)}")
         doc = (
             '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
@@ -304,14 +429,16 @@ def main():
             f'<div class="sub">{sub_bits}</div>'
             f'<div class="kpi">{kpi_html}</div>'
             f'<div class="concl">{concl}</div>'
-            "<table><thead><tr>"
+            + (f'<div class="alerts"><ul>{alerts_html}</ul></div>' if alerts_html else "")
+            + (f'<h2 class="dfx-t">缺陷清單 — 可直接回報</h2>{defects_tbl}' if defects_tbl else "")
+            + "<table><thead><tr>"
             '<th class="n">編號</th><th class="n">代碼</th><th>遊戲名</th>'
             + ("<th>後台遊戲名</th>" if has_bo_gn else "")
             + '<th class="n">投注</th>'
             '<th class="n">進入前</th><th class="n">進入後</th><th class="n">delta</th>'
             '<th class="n">後台輸贏</th><th>SPIN 時間</th><th>注單號</th><th>狀態</th><th>備註</th>'
             "</tr></thead><tbody>" + "".join(srows) + "</tbody></table>"
-            f"<footer>report_dir：{esc(rd)}/ · 來源 games.jsonl {total} 行 · 注單號＝後台「注單」欄，多注單以逗號分隔</footer>"
+            f"<footer>report_dir：{esc(rd)}/ · 來源 games.jsonl {total} 行"+ (f" · {esc(betid_caption)}" if betid_caption else "") + "</footer>"
             "</body></html>")
         out_path = a.out or os.path.join(rd, "qa-report-simple.html")
         with open(out_path, "w", encoding="utf-8") as f:
@@ -319,7 +446,10 @@ def main():
         print(json.dumps({
             "out": out_path, "variant": "simple", "total": total, "pass": npass,
             "abnormal": abnormal, "net_delta": net, "total_bet": total_bet,
-            "betid_rows": n_betid, "bo_winlose_total": wl_total,
+            "library_total": lib_total, "games_distinct": games_distinct,
+            "games_covered": games_covered, "retry_rows": n_retry_rows,
+            "betid_rows": n_betid, "bo_id_rows": n_bo_id, "ingame_id_rows": n_ingame_id,
+            "bo_winlose_total": wl_total, "alerts": len(alerts),
         }, ensure_ascii=False))
         return
 
@@ -344,32 +474,61 @@ def main():
     paras = nar.get("verdict", {}).get("paragraphs")
     if not paras:
         paras = [
-            f"本次測試對 <b>{esc(brand_disp)}</b> 共 <b>{total} 款</b>逐一驗證，結果 "
-            f"<b>{npass} 款 PASS</b>" + (f"（{npass/total*100:.0f}%）" if total else "") +
+            f"本次測試對 <b>{esc(brand_disp)}</b> 執行 <b>{total} 列</b>"
+            + (f"（涵蓋 {games_distinct} 款"
+               + (f"，全庫 {lib_total} 款" if lib_total else "") + "）"
+               if games_distinct is not None and games_distinct != total else "")
+            + "，結果 "
+            f"<b>{npass} 列 PASS</b>" + (f"（{npass/total*100:.0f}%）" if total else "") +
             "。每款皆以遊戲內餘額 before/after 實際變動（delta≠0）確認真實下注，非單純點擊 SPIN。",
             f"餘額鏈<b>斷點 {nbreak}</b>" + ("（每款下注前餘額精確等於前一款下注後餘額，連中獎小數位都完整接續，構成逐筆真實下注的完整證據鏈）。"
              if nbreak == 0 else "（有斷點，需人工查驗下列明細表）。"),
         ]
     verdict_inner = (f'<div class="verdict-head"><h2>測試結論 — Test Verdict</h2>{chips_html}</div>' +
                      f'<p class="lead">{paras[0]}</p>' +
-                     "".join(f"<p>{p}</p>" for p in paras[1:]))
+                     "".join(f"<p>{p}</p>" for p in paras[1:]) +
+                     (f'<ul style="background:#fff8e6;border:1px solid #e3c766;border-left:4px solid #c8860a;'
+                      f'padding:10px 14px 10px 32px;margin:14px 0 0;border-radius:4px">{alerts_html}</ul>'
+                      if alerts_html else ""))
 
     # ---- 區塊：metrics ----
     pct = f"<small>/{total}</small>"
     metrics = [
-        ("ok" if all_pass else "warn", f"{npass}{pct}", "測試款數 · PASS"),
+        ("ok" if all_pass else "warn", f"{npass}{pct}", f"PASS 列 · 共 {total} 列"),
         ("ok" if nbreak == 0 else "neg", str(nbreak), "餘額鏈斷點 · 逐筆相接"),
         ("", str(nshots), "證據截圖張數"),
-        ("", str(wins), "觀察到中獎款"),
-        ("neg" if num(net) and net < 0 else "ok", (signed(net) if num(net) else "—"), f"{total} 款淨輸贏 delta"),
-        ("ok" if abnormal == 0 else "neg", str(abnormal), "異常款 / 假 PASS"),
-    ]
+        ("", str(wins), "觀察到中獎的執行列"),
+        ("neg" if num(net) and net < 0 else "ok", (signed(net) if num(net) else "—"), f"全部 {total} 列淨 delta"),
+        ("ok" if abnormal == 0 else "neg", str(abnormal), "異常列 / 假 PASS"),
+    ] + ([("", (f"{games_covered}<small>/{lib_total}</small>" if lib_total else str(games_covered)),
+           ("已覆蓋款數 · 全庫" if lib_total else "已 PASS 款數"))]
+         if games_covered is not None else [])
     metrics_inner = "".join(
         f'<div class="metric {c}"><div class="num">{v}</div><div class="lab">{esc(l)}</div></div>'
         for c, v, l in metrics)
 
     # ---- 區塊：時間投入（座標校準 vs 測試執行）----
-    calib = meta.get("calibration") or {}
+    # X-122 健壯性修正：`calibration` 的意圖 schema 是「dict 或缺席」。
+    #   全庫 168 個 run 實查：NoneType 166 / dict 1 / str 1 —— 偏離只有一個（值為校準目錄的路徑字串）。
+    #   🔴 問題不在誰不合規，而在**共用工具對非預期輸入直接 AttributeError 崩潰**：
+    #      失敗方式是崩潰而不是降級，代價與偏離程度不成比例。
+    #   界線（刻意窄）：
+    #     · dict        → 照舊使用（合規路徑**行為完全不變**）
+    #     · None        → 照舊視同缺席，**不做任何回退**
+    #                     （None 是合規的「缺席」；對它加回退會改動合規輸入的行為）
+    #     · 其他型別    → 視同缺席，並回退讀同 run 的 calib-meta.json（若存在），
+    #                     且把來源記進 calib_origin，報告需標明不是從 run-meta 讀到的。
+    calib_raw = meta.get("calibration")
+    calib_origin = "run-meta.json"
+    if isinstance(calib_raw, dict):
+        calib = calib_raw
+    else:
+        calib = {}
+        if calib_raw is not None:
+            _cm = load_json(os.path.join(rd, "calib-meta.json"))
+            if isinstance(_cm, dict):
+                calib = _cm
+                calib_origin = "calib-meta.json"
     calib_seconds = calib.get("seconds")
     if calib_seconds is None:
         calib_seconds = dur_seconds(calib.get("started_at"), calib.get("ended_at"))
@@ -390,14 +549,15 @@ def main():
     NUMCSS = "font-family:var(--display);font-weight:700;font-size:30px;line-height:1;letter-spacing:-.02em"
     if calib_seconds is not None:
         calib_sub = (f"viewport {calib_vp_s}　·　首次校準（SPIN／餘額／退出座標與判定）"
-                     + ("　·　<i>由產物時間回推、為近似值</i>" if calib_src == "reconstructed" else ""))
+                     + ("　·　<i>由產物時間回推、為近似值</i>" if calib_src == "reconstructed" else "")
+                     + (f"　·　<i>校準數據來源：{esc(calib_origin)}</i>" if calib_origin != "run-meta.json" else ""))
     else:
         calib_sub = "本次 run 未記錄校準時間（calibrate／run 升級後會自動帶入）"
     exec_sub = (f"每款平均 ~{fmt_dur(per_game_seconds)}　·　首款 before → 末款 after"
                 if exec_seconds is not None else "games.jsonl 無逐款讀取時間，無法計時")
     if calib_seconds is not None and exec_seconds is not None:
         callout_time = (f"<b>校準是一次性成本：</b>本次「座標校準·判定」約 <b>{fmt_dur(calib_seconds)}</b>，"
-                        f"換來 {total} 款共 <b>{fmt_dur(exec_seconds)}</b> 的逐款驗餘額執行（每款 ~{fmt_dur(per_game_seconds)}）。"
+                        f"換來 {total} 列共 <b>{fmt_dur(exec_seconds)}</b> 的逐列驗餘額執行（每列 ~{fmt_dur(per_game_seconds)}）。"
                         f"同站、同 viewport 下校準參數可重複沿用，攤提到每款約 <b>{fmt_dur(amort)}</b>；"
                         f"款數越多、單位校準成本越低。本次合計投入約 {fmt_dur(calib_seconds + exec_seconds)}。")
     else:
@@ -407,7 +567,7 @@ def main():
         '<div class="panel"><h3>座標校準 · 判定 <span class="tag">一次性</span></h3>'
         f'<div style="{NUMCSS};color:var(--amber)">{fmt_dur(calib_seconds)}</div>'
         f'<p style="margin-top:8px">{calib_sub}</p></div>'
-        f'<div class="panel"><h3>測試執行 <span class="tag">{total} 款</span></h3>'
+        f'<div class="panel"><h3>測試執行 <span class="tag">{total} 列</span></h3>'
         f'<div style="{NUMCSS};color:var(--green)">{fmt_dur(exec_seconds)}</div>'
         f'<p style="margin-top:8px">{exec_sub}</p></div></div>'
         f'<div class="callout">{callout_time}</div>')
@@ -416,16 +576,17 @@ def main():
     curve = build_curve_svg(games)
     if curve:
         legend = (f'<span><i class="swatch" style="background:#0E7A57"></i>餘額（after_bal）</span>'
-                  f'<span><i class="swatch" style="background:#13212B;width:9px;height:9px;border-radius:50%"></i>起 {money(curve["start"])}</span>'
-                  f'<span><i class="swatch" style="background:#BC392C;width:9px;height:9px;border-radius:50%"></i>終 {money(curve["end"])}</span>')
+                  f'<span><i class="swatch" style="background:#13212B;width:9px;height:9px;border-radius:50%"></i>首點 {money(curve["start"])}</span>'
+                  f'<span><i class="swatch" style="background:#BC392C;width:9px;height:9px;border-radius:50%"></i>末點 {money(curve["end"])}</span>')
         if curve["big"]:
             bigtxt = "、".join(f'{esc(i)} 「{esc(nm)}」{signed(d)}' for i, nm, d in curve["big"])
             legend = (f'<span><i class="swatch" style="background:#0E7A57"></i>餘額（after_bal）</span>'
                       f'<span><i class="swatch" style="background:#A8650A;border-radius:50%;width:9px;height:9px"></i>大獎跳升：{bigtxt}</span>'
-                      f'<span><i class="swatch" style="background:#13212B;width:9px;height:9px;border-radius:50%"></i>起 {money(curve["start"])}</span>'
-                      f'<span><i class="swatch" style="background:#BC392C;width:9px;height:9px;border-radius:50%"></i>終 {money(curve["end"])}</span>')
+                      f'<span><i class="swatch" style="background:#13212B;width:9px;height:9px;border-radius:50%"></i>首點 {money(curve["start"])}</span>'
+                      f'<span><i class="swatch" style="background:#BC392C;width:9px;height:9px;border-radius:50%"></i>末點 {money(curve["end"])}</span>')
         co = (f'<div class="curve-card"><div class="ctitle">'
               f'<h3>{money(curve["start"])} → {money(curve["end"])}　·　{curve["n"]} 筆連續餘額（idx 序）</h3>'
+              '<span class="note">曲線點為每列 after_bal，故首點是第一列<b>下注後</b>的餘額，不是帳戶起始餘額</span>'
               f'<span class="note">每款 before＝前款 after，' + ("零斷點" if nbreak == 0 else f"{nbreak} 處斷點") + '</span></div>'
               f'{curve["svg"]}<div class="curve-legend">{legend}</div></div>'
               f'<div class="callout"><b>為何這條線是證據：</b>每一款的「下注前餘額」都精確等於前一款的「下注後餘額」，連中獎小數位都完整接續。'
@@ -436,7 +597,7 @@ def main():
 
     # ---- 區塊：method ----
     cov = nar.get("method", {}).get("coverage") or {
-        "測試款數": f"{total} 款", "餘額判讀": "截圖目視·讀兩次一致"}
+        "測試列數": f"{total} 列", "餘額判讀": "截圖目視·讀兩次一致"}
     cov_html = "".join(f'<div class="kv"><span class="k">{esc(k)}</span><span class="vv">{esc(v)}</span></div>'
                        for k, v in cov.items())
     pass_def = nar.get("method", {}).get("pass_def") or (
@@ -470,13 +631,13 @@ def main():
     mc_html = "".join(f'<li><b>{esc(x.get("id",""))} {esc(x.get("name",""))}</b>：{x.get("text","")}</li>' for x in mc) or \
         '<li style="color:var(--muted)">本批無加轉／重試案例</li>'
     win_note = nar.get("summary", {}).get("win_note") or \
-        f"{total} 款中 <b>{wins} 款觀察到中獎</b>（派彩抵注或淨增）；其餘為標準扣注。最大幾筆："
+        f"{total} 列中 <b>{wins} 列觀察到中獎</b>（派彩抵注或淨增）；其餘為標準扣注。最大幾筆："
     summary_inner = (
         '<div class="grid2" style="margin-bottom:16px">'
         '<div class="panel"><h3>帳戶層級</h3><table style="border:none"><tbody>'
         f'<tr><td>起始餘額</td><td class="num">{money(start_bal)}</td></tr>'
         f'<tr><td>結束餘額</td><td class="num">{money(end_bal)}</td></tr>'
-        f'<tr><td>{total} 款投注額合計</td><td class="num">{money(total_bet)}</td></tr>'
+        f'<tr><td>{total} 列投注額合計</td><td class="num">{money(total_bet)}</td></tr>'
         f'<tr class="total"><td>淨輸贏 delta</td><td class="num">{signed(net) if num(net) else "—"}</td></tr>'
         '</tbody></table></div>'
         f'<div class="panel"><h3>中獎觀察</h3><p style="margin-bottom:10px">{win_note}</p>'
@@ -509,8 +670,11 @@ def main():
     detail_inner = (
         '<style>.detail-scroll td.betid{font-family:ui-monospace,Menlo,Consolas,monospace;'
         'font-size:11px;color:var(--muted);white-space:nowrap;word-break:keep-all}</style>'
-        '<div class="detail-tools">逐款下注前後餘額、SPIN 時間與後台注單號，順序同遊戲序列表（idx）；'
-        '可對照後台投注報表逐筆核對（注單號＝後台「注單」欄，多注單以逗號分隔）。共 ' + str(total) + ' 款。</div>'
+        '<div class="detail-tools">逐款下注前後餘額、SPIN 時間與'
+        + ('注單號' if betid_ingame_only else '後台注單號')
+        + '，順序同遊戲序列表（idx）；'
+        + ('可對照後台投注報表逐筆核對（' + esc(betid_caption) + '）。' if betid_caption else '')
+        + '共 ' + str(total) + ' 列。</div>'
         '<div class="detail-scroll"><table><thead><tr>'
         '<th class="num">編號</th><th class="num">代碼</th><th>遊戲名</th>'
         + ("<th>後台遊戲名</th>" if full_has_bo_gn else "")
@@ -564,7 +728,7 @@ def main():
         "{{TITLE}}": esc(title),
         "{{KICKER}}": '<span class="dot"></span>QA MANAGER REVIEW · 功能測試 <span class="dot"></span> REGRESSION REPORT',
         "{{H1}}": esc(title),
-        "{{SUB}}": esc(nar.get("sub") or f"針對 {brand_disp} 共 {total} 款逐款功能驗證，每款保留證據截圖，並以遊戲內餘額變動逐筆確認真實下注。"),
+        "{{SUB}}": esc(nar.get("sub") or f"針對 {brand_disp} 共 {total} 列逐列功能驗證，每列保留證據截圖，並以遊戲內餘額變動逐筆確認真實下注。"),
         "{{META_ROWS}}": meta_rows,
         "{{VERDICT_INNER}}": verdict_inner,
         "{{METRICS_INNER}}": metrics_inner,
@@ -574,12 +738,14 @@ def main():
         "{{SUMMARY_INNER}}": summary_inner,
         "{{DETAIL_INNER}}": detail_inner,
         "{{EVIDENCE_INNER}}": evidence_inner,
+        "{{DEFECTS_SECTION}}": defects_sec,
         "{{RECS_INNER}}": recs_inner,
         "{{FOOTER_INNER}}": footer_inner,
     }
     out_html = template
     for k, v in repl.items():
         out_html = out_html.replace(k, v)
+    out_html = renumber_sections(out_html)
 
     out_path = a.out or os.path.join(rd, "qa-report.html")
     with open(out_path, "w", encoding="utf-8") as f:
@@ -589,8 +755,11 @@ def main():
         "out": out_path, "total": total, "pass": npass, "abnormal": abnormal,
         "chain_breaks": nbreak, "screenshots": nshots, "wins": wins,
         "net_delta": net, "start_bal": start_bal, "end_bal": end_bal,
+        "library_total": lib_total, "games_distinct": games_distinct,
+        "games_covered": games_covered, "retry_rows": n_retry_rows,
         "has_spin_time": has_time, "time_range": time_range,
         "calib_seconds": calib_seconds, "calib_source": calib_src or None,
+        "calib_origin": calib_origin,
         "exec_seconds": exec_seconds,
         "per_game_seconds": round(per_game_seconds, 1) if per_game_seconds is not None else None,
     }, ensure_ascii=False))
