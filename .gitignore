@@ -40,6 +40,10 @@ Thumbs.db
 !.mcp.json.example
 scripts/secret-scan.local-patterns
 
+# 無人值守的視窗尺寸是每台機器自己的解析度，不入 repo
+# 共用範本是 playwright-mcp.unattended.json.example
+playwright-mcp.unattended.json
+
 # 站點設定（含帳號/網址）—— 本機專用，絕不入版控。
 # 注意：架構文件寫的是「main 無 .env」，實務上本機會有一份供 AI 參考（值一律當「上次觀測」，
 # 用前必須當場驗證）。這行只保證它不會被誤 commit；secret-scan hook 是第二道防線，不是唯一防線。
