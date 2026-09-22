@@ -275,12 +275,34 @@ def main():
         return False
     wins = sum(1 for g in games if is_win(g))
 
-    breaks = []
-    for i in range(1, len(games)):
-        a0, b1 = games[i - 1].get("after_bal"), games[i].get("before_bal")
-        if num(a0) and num(b1) and abs(b1 - a0) > 0.001:
-            breaks.append(games[i].get("idx"))
+    # ---- 餘額鏈斷點（X-141：往前帶錨點，不再對 null 列靜默跳過）----
+    # 🔴 舊版比對「嚴格相鄰兩列」，任一列的 after_bal/before_bal 非數就跳過。
+    #    本檔實測 33 列非數 ⇒ 48 對比對被跳過。真實斷點若緊接在 null 列之後會被**無聲遮蔽**。
+    # 🔴 方向澄清（我原本想反了）：跳過才是「靜默假設 null 列沒動錢」；
+    #    往前帶不會製造假陰性 —— null 列若動了錢，段後第一列就會對不上錨點而**冒出**斷點。
+    #    代價只是斷點的**歸屬位置**變模糊（可能落在 anchor_idx+1 .. 本列之間）,
+    #    故一併輸出 anchor_idx 與跨越列數，讓讀者知道範圍。
+    # 🔴 錨點**只用 after_bal**：不退用同列的 before_bal —— 那等於斷言該列自身零資金移動，
+    #    對 BET_NOT_PLACED 成立、對一般列不成立（audit.x1.py 的舊寫法有此問題）。
+    breaks, break_rows = [], []
+    anchor = None          # 最後一個可用的 after_bal
+    anchor_idx = None
+    spanned = 0            # 自錨點以來跨過幾列（沒有可用 after_bal 的列）
+    for g in games:
+        b1 = g.get("before_bal")
+        if anchor is not None and num(b1) and abs(b1 - anchor) > 0.001:
+            breaks.append(g.get("idx"))
+            break_rows.append({"idx": g.get("idx"), "anchor_idx": anchor_idx,
+                               "spanned_rows": spanned,
+                               "anchor_after_bal": anchor, "before_bal": b1,
+                               "diff": round(b1 - anchor, 4)})
+        a1 = g.get("after_bal")
+        if num(a1):
+            anchor, anchor_idx, spanned = a1, g.get("idx"), 0
+        else:
+            spanned += 1
     nbreak = len(breaks)
+    n_break_spanning = sum(1 for r in break_rows if r["spanned_rows"] > 0)
 
     shots_dir = os.path.join(rd, "screenshots")
     nshots = len([f for f in os.listdir(shots_dir)]) if os.path.isdir(shots_dir) else \
