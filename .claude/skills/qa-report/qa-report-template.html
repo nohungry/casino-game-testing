@@ -151,6 +151,24 @@
     .rec,.metric,.panel{break-inside:avoid}
     .detail-scroll{max-height:none; overflow:visible}
   }
+
+  /* ---- 缺陷登記表（QA 可直接回報的清單）---- */
+  .dfx-sum{width:100%;border-collapse:collapse;margin:0 0 14px;font-size:13px}
+  .dfx-sum th,.dfx-sum td{border-bottom:1px solid var(--line);padding:6px 10px;text-align:left}
+  .dfx-sum th{color:var(--mut);font-weight:600;font-size:12px;letter-spacing:.04em}
+  .dfx-sum td.n{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+  .dfx{border:1px solid var(--line);border-left:4px solid var(--mut);border-radius:6px;padding:12px 14px;margin:0 0 10px;background:#fff}
+  .dfx.s-p1{border-left-color:var(--neg)}.dfx.s-p2{border-left-color:#A8650A}.dfx.s-p3{border-left-color:var(--mut)}
+  .dfx-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin-bottom:8px}
+  .dfx-h h4{margin:0;font-size:15px;flex:1 1 320px}
+  .chip{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;font-family:var(--mono)}
+  .chip.id{background:#13212B;color:#fff}
+  .chip.p1{background:#fbe5e2;color:var(--neg)}.chip.p2{background:#fdf0dc;color:#A8650A}.chip.p3{background:#eef0f2;color:var(--mut)}
+  .chip.side{background:#e8eef2;color:#2c4a5e}.chip.st{background:#e2f5ec;color:var(--pos)}
+  .dfx dl{display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;margin:0;font-size:13px;line-height:1.55}
+  .dfx dt{color:var(--mut);font-weight:600;white-space:nowrap}
+  .dfx dd{margin:0}
+  @media(max-width:640px){.dfx dl{grid-template-columns:1fr}.dfx dt{margin-top:6px}}
 </style>
 </head>
 <body>
@@ -167,6 +185,8 @@
 <div class="wrap">
 
   <div class="verdict">{{VERDICT_INNER}}</div>
+
+{{DEFECTS_SECTION}}
 
   <section>
     <div class="sec-head"><span class="sec-no">01</span><h2>關鍵指標</h2><span class="en">Key Metrics</span></div>
